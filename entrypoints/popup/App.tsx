@@ -9,6 +9,7 @@ import { ActivityHealthBadges } from "@/components/activity-health-badges";
 import { OnboardingView } from "@/components/onboarding-view";
 import { ResumePicker } from "@/components/resume-picker";
 import { SeriesTetherPanel } from "@/components/series-tether-panel";
+import { TabActionsMenu } from "@/components/tab-actions-menu";
 import { openDashboard } from "@/lib/open-dashboard";
 import { describeSyncModes } from "@/lib/sync-modes";
 import type { PrivacySettings, SyncModes, TrackedTab, TetherMode } from "@/lib/types";
@@ -242,7 +243,12 @@ function SettingsView({
 
       <CollapsibleSection id="settings-device" title="This device">
         <div className="panel stack">
-          <M3TextField id="device" label="Device name" value={deviceName} onChange={setDeviceName} />
+          <M3TextField
+            id="device"
+            label="Device name"
+            value={deviceName}
+            onChange={setDeviceName}
+          />
           <button className="btn secondary" disabled={pending} onClick={saveDevice}>
             Save device name
           </button>
@@ -301,7 +307,6 @@ function SettingsView({
       </CollapsibleSection>
 
       {error ? <p className="error">{error}</p> : null}
-
     </div>
   );
 }
@@ -364,63 +369,50 @@ function MainView({
   const canTrack = Boolean(current && !tracked);
   const movedOn = current?.movedOn ?? null;
   const seriesProgress = seriesLearningProgress(tracked?.seriesPattern);
-  const lanSummary =
-    snapshot.syncModes.lan && snapshot.pairedLanDevices.length > 0
-      ? `${snapshot.lanConnectedPeers}/${snapshot.pairedLanDevices.length} LAN peers online`
-      : null;
 
   return (
     <div className="stack">
-      <div className="brand">
-        <h1>TabTether</h1>
-        <button
-          className="btn ghost icon-btn"
-          type="button"
-          onClick={onOpenSettings}
-          title="Settings"
-          aria-label="Settings"
-        >
-          <IconSettings />
-        </button>
-      </div>
-
-      <CollapsibleSection
-        id="sync-status"
-        title="Sync"
-        defaultOpen={snapshot.pendingSyncCount > 0}
-        badge={
-          snapshot.pendingSyncCount > 0
-            ? `${snapshot.pendingSyncCount} pending`
-            : describeSyncModes(snapshot.syncModes)
-        }
-      >
-        <div className="panel compact-track sync-status-bar">
-          <div className="row wrap" style={{ justifyContent: "space-between" }}>
-            <span className="pill">{describeSyncModes(snapshot.syncModes)}</span>
-            {lanSummary ? <span className="muted">{lanSummary}</span> : null}
-          </div>
+      <header className="popup-header">
+        <div className="popup-header__brand">
+          <img src="/icon/128.png" width={22} height={22} alt="" />
+          <h1>TabTether</h1>
+        </div>
+        <div className="popup-header__actions">
+          <span className="pill">{describeSyncModes(snapshot.syncModes)}</span>
           {snapshot.pendingSyncCount > 0 ? (
-            <p className="muted" style={{ margin: 0, fontSize: 12 }}>
-              {snapshot.pendingSyncCount} queued update
-              {snapshot.pendingSyncCount === 1 ? "" : "s"} waiting to sync.
-            </p>
+            <button
+              className="btn ghost compact"
+              type="button"
+              disabled={pending}
+              onClick={() =>
+                run(async () => {
+                  const res = await sendMessage({ type: "SYNC_NOW" });
+                  if (!res.ok) throw new Error(res.error);
+                  if (res.snapshot) onUpdate(res.snapshot);
+                })
+              }
+            >
+              Retry sync
+            </button>
           ) : null}
           <button
-            className="btn secondary"
+            className="btn ghost icon-btn"
             type="button"
-            disabled={pending}
-            onClick={() =>
-              run(async () => {
-                const res = await sendMessage({ type: "SYNC_NOW" });
-                if (!res.ok) throw new Error(res.error);
-                if (res.snapshot) onUpdate(res.snapshot);
-              })
-            }
+            onClick={onOpenSettings}
+            title="Settings"
+            aria-label="Settings"
           >
-            {snapshot.pendingSyncCount > 0 ? "Retry sync" : "Sync now"}
+            <IconSettings />
           </button>
         </div>
-      </CollapsibleSection>
+      </header>
+
+      {snapshot.pendingSyncCount > 0 ? (
+        <p className="muted sync-pending-note" role="status">
+          {snapshot.pendingSyncCount} queued update
+          {snapshot.pendingSyncCount === 1 ? "" : "s"} waiting to sync.
+        </p>
+      ) : null}
 
       {snapshot.pendingReconnect.length > 0 ? (
         <CollapsibleSection
@@ -492,7 +484,7 @@ function MainView({
         }
       >
         {movedOn ? (
-          <div className="panel stack">
+          <div className="panel stack moved-on-card">
             <p className="title" style={{ margin: 0 }}>
               {movedOn.emoji ? `${movedOn.emoji} ` : ""}
               {movedOn.name} continued from where you left
@@ -541,9 +533,9 @@ function MainView({
                 </div>
               </div>
             ) : null}
-            <div className="row wrap">
+            <div className="row wrap action-row">
               <button
-                className="btn"
+                className="btn compact"
                 disabled={pending}
                 onClick={() =>
                   run(async () => {
@@ -560,7 +552,7 @@ function MainView({
                 Go To
               </button>
               <button
-                className="btn secondary"
+                className="btn secondary compact"
                 disabled={pending}
                 onClick={() =>
                   run(async () => {
@@ -577,7 +569,7 @@ function MainView({
                 Reset to this page
               </button>
               <button
-                className="btn ghost"
+                className="btn ghost compact"
                 disabled={pending}
                 onClick={() =>
                   run(async () => {
@@ -610,7 +602,9 @@ function MainView({
               Tethered
               {tracked.tetherMode === "series" ? <span className="pill">Series</span> : null}
               {tracked.isPrivate ? <span className="pill">Private</span> : null}
-              {!current.isActiveOwner ? <span className="pill pill--warning">owned elsewhere</span> : null}
+              {!current.isActiveOwner ? (
+                <span className="pill pill--warning">owned elsewhere</span>
+              ) : null}
             </div>
             <ActivityHealthBadges health={tracked.health} />
             {tracked.health && activityHealthRecoveryHint(tracked.health) ? (
@@ -653,14 +647,16 @@ function MainView({
                 Edit name, emoji, tags…
               </button>
             )}
-            <p className="url">{displayHostPath(tracked.currentUrl)}</p>
+            <p className="url" title={displayHostPath(tracked.currentUrl)}>
+              {displayHostPath(tracked.currentUrl)}
+            </p>
             <p className="muted" style={{ margin: 0, fontSize: 11 }}>
               Last updated from {formatDevice(tracked)} · {relativeTime(tracked.lastUpdatedAt)}
             </p>
-            <div className="row wrap">
+            <div className="row wrap action-row">
               {!current.isActiveOwner ? (
                 <button
-                  className="btn"
+                  className="btn compact"
                   disabled={pending}
                   onClick={() =>
                     run(async () => {
@@ -677,75 +673,14 @@ function MainView({
                 </button>
               ) : null}
               <button
-                className="btn secondary"
+                className="btn secondary compact"
                 disabled={pending}
                 onClick={() => onOpenHistory(tracked)}
               >
                 History
               </button>
               <button
-                className="btn secondary"
-                disabled={pending}
-                onClick={() =>
-                  run(async () => {
-                    const watching = snapshot.watchedActivityIds.includes(tracked.id);
-                    const res = await sendMessage({
-                      type: "SET_WATCH",
-                      trackedTabId: tracked.id,
-                      watching: !watching,
-                    });
-                    if (!res.ok) throw new Error(res.error);
-                    if (res.snapshot) onUpdate(res.snapshot);
-                  })
-                }
-              >
-                {snapshot.watchedActivityIds.includes(tracked.id) ? "Watching" : "Watch"}
-              </button>
-              <ExportActivityButtons tracked={tracked} disabled={pending} className="btn secondary" />
-              {!tracked.archivedAt ? (
-                <button
-                  className="btn secondary"
-                  disabled={pending}
-                  onClick={() =>
-                    run(async () => {
-                      const res = await sendMessage({
-                        type: "ARCHIVE_TAB",
-                        trackedTabId: tracked.id,
-                      });
-                      if (!res.ok) throw new Error(res.error);
-                      if (res.snapshot) onUpdate(res.snapshot);
-                    })
-                  }
-                >
-                  Archive
-                </button>
-              ) : (
-                <button
-                  className="btn secondary"
-                  disabled={pending}
-                  onClick={() =>
-                    run(async () => {
-                      const res = await sendMessage({
-                        type: "RESTORE_TAB",
-                        trackedTabId: tracked.id,
-                      });
-                      if (!res.ok) throw new Error(res.error);
-                      if (res.snapshot) onUpdate(res.snapshot);
-                    })
-                  }
-                >
-                  Restore
-                </button>
-              )}
-              <button
-                className="btn secondary"
-                disabled={pending}
-                onClick={() => setShowSeriesPanel((value) => !value)}
-              >
-                {showSeriesPanel ? "Hide series pattern" : "Series pattern"}
-              </button>
-              <button
-                className="btn secondary"
+                className="btn secondary compact"
                 disabled={pending}
                 onClick={() => openDashboard(snapshot, "tabs")}
               >
@@ -753,7 +688,7 @@ function MainView({
               </button>
               {boundCount > 1 ? (
                 <button
-                  className="btn danger"
+                  className="btn danger compact"
                   disabled={pending}
                   onClick={() =>
                     run(async () => {
@@ -767,7 +702,7 @@ function MainView({
                 </button>
               ) : (
                 <button
-                  className="btn danger"
+                  className="btn danger compact"
                   disabled={pending}
                   onClick={() =>
                     run(async () => {
@@ -780,27 +715,90 @@ function MainView({
                     })
                   }
                 >
-                  Untether tab
+                  Untether
                 </button>
               )}
-              {boundCount > 1 ? (
+              <TabActionsMenu>
                 <button
-                  className="btn danger"
+                  className="btn ghost"
                   disabled={pending}
                   onClick={() =>
                     run(async () => {
+                      const watching = snapshot.watchedActivityIds.includes(tracked.id);
                       const res = await sendMessage({
-                        type: "STOP_TRACKING",
+                        type: "SET_WATCH",
                         trackedTabId: tracked.id,
+                        watching: !watching,
                       });
                       if (!res.ok) throw new Error(res.error);
                       if (res.snapshot) onUpdate(res.snapshot);
                     })
                   }
                 >
-                  Delete activity
+                  {snapshot.watchedActivityIds.includes(tracked.id) ? "Stop watching" : "Watch"}
                 </button>
-              ) : null}
+                <ExportActivityButtons tracked={tracked} disabled={pending} />
+                {!tracked.archivedAt ? (
+                  <button
+                    className="btn ghost"
+                    disabled={pending}
+                    onClick={() =>
+                      run(async () => {
+                        const res = await sendMessage({
+                          type: "ARCHIVE_TAB",
+                          trackedTabId: tracked.id,
+                        });
+                        if (!res.ok) throw new Error(res.error);
+                        if (res.snapshot) onUpdate(res.snapshot);
+                      })
+                    }
+                  >
+                    Archive
+                  </button>
+                ) : (
+                  <button
+                    className="btn ghost"
+                    disabled={pending}
+                    onClick={() =>
+                      run(async () => {
+                        const res = await sendMessage({
+                          type: "RESTORE_TAB",
+                          trackedTabId: tracked.id,
+                        });
+                        if (!res.ok) throw new Error(res.error);
+                        if (res.snapshot) onUpdate(res.snapshot);
+                      })
+                    }
+                  >
+                    Restore
+                  </button>
+                )}
+                <button
+                  className="btn ghost"
+                  disabled={pending}
+                  onClick={() => setShowSeriesPanel((value) => !value)}
+                >
+                  {showSeriesPanel ? "Hide series pattern" : "Series pattern"}
+                </button>
+                {boundCount > 1 ? (
+                  <button
+                    className="btn danger"
+                    disabled={pending}
+                    onClick={() =>
+                      run(async () => {
+                        const res = await sendMessage({
+                          type: "STOP_TRACKING",
+                          trackedTabId: tracked.id,
+                        });
+                        if (!res.ok) throw new Error(res.error);
+                        if (res.snapshot) onUpdate(res.snapshot);
+                      })
+                    }
+                  >
+                    Delete activity
+                  </button>
+                ) : null}
+              </TabActionsMenu>
             </div>
             {showSeriesPanel ? (
               <SeriesTetherPanel
@@ -813,10 +811,12 @@ function MainView({
           </div>
         ) : (
           <div className="panel stack">
-            <p className="title" style={{ margin: 0 }}>
+            <p className="title" style={{ margin: 0 }} title={current.title || "Untitled page"}>
               {current.title || "Untitled page"}
             </p>
-            <p className="url">{displayHostPath(current.url)}</p>
+            <p className="url" title={displayHostPath(current.url)}>
+              {displayHostPath(current.url)}
+            </p>
             <M3TextField
               id="track-name"
               label="Name (optional)"
@@ -896,11 +896,16 @@ function MainView({
                         })
                       }
                     >
-                      <span className="name">
+                      <span
+                        className="name"
+                        title={`${activity.emoji ? `${activity.emoji} ` : ""}${activity.name}`}
+                      >
                         {activity.emoji ? `${activity.emoji} ` : ""}
                         {activity.name}
                       </span>
-                      <span className="sub">{displayHostPath(activity.currentUrl)}</span>
+                      <span className="sub" title={displayHostPath(activity.currentUrl)}>
+                        {displayHostPath(activity.currentUrl)}
+                      </span>
                       {(snapshot.boundTabCounts[activity.id] ?? 0) > 0 ? (
                         <span className="sub">
                           {snapshot.boundTabCounts[activity.id]} tab
@@ -993,12 +998,16 @@ function MainView({
                 className={`list-item window-tab-item${tab.active ? " current" : ""}`}
                 style={{ cursor: "default" }}
               >
-                <div className="row wrap" style={{ justifyContent: "space-between", gap: 8 }}>
-                  <span className="name">{tab.title || "Untitled page"}</span>
+                <div className="row" style={{ justifyContent: "space-between", gap: 8 }}>
+                  <span className="name" title={tab.title || "Untitled page"}>
+                    {tab.title || "Untitled page"}
+                  </span>
                   {tab.active ? <span className="pill">Active</span> : null}
                   {tab.tracked ? <span className="pill">Tethered</span> : null}
                 </div>
-                <span className="sub">{displayHostPath(tab.url)}</span>
+                <span className="sub" title={displayHostPath(tab.url)}>
+                  {displayHostPath(tab.url)}
+                </span>
                 {tab.tracked ? (
                   <span className="sub">
                     {tab.tracked.emoji ? `${tab.tracked.emoji} ` : ""}
@@ -1047,22 +1056,25 @@ function MainView({
                   })
                 }
               >
-                <span className="name">
-                  {tab.emoji ? `${tab.emoji} ` : ""}
-                  {tab.name}
-                  {tracked?.id === tab.id ? " (current page)" : ""}
+                <div className="row" style={{ justifyContent: "space-between", gap: 8 }}>
+                  <span
+                    className="name"
+                    title={`${tab.emoji ? `${tab.emoji} ` : ""}${tab.name}${tracked?.id === tab.id ? " (current page)" : ""}`}
+                  >
+                    {tab.emoji ? `${tab.emoji} ` : ""}
+                    {tab.name}
+                    {tracked?.id === tab.id ? " (current page)" : ""}
+                  </span>
                   {snapshot.catchUp.some((item) => item.trackedTabId === tab.id) ? (
-                    <span className="pill pill--warning" style={{ marginLeft: 6 }}>
-                      Behind
-                    </span>
+                    <span className="pill pill--warning">Behind</span>
                   ) : snapshot.watchedActivityIds.includes(tab.id) ? (
-                    <span className="pill" style={{ marginLeft: 6 }}>
-                      Watching
-                    </span>
+                    <span className="pill">Watching</span>
                   ) : null}
-                </span>
+                </div>
                 <ActivityHealthBadges health={tab.health} />
-                <span className="sub">{tab.currentTitle || displayHostPath(tab.currentUrl)}</span>
+                <span className="sub" title={tab.currentTitle || displayHostPath(tab.currentUrl)}>
+                  {tab.currentTitle || displayHostPath(tab.currentUrl)}
+                </span>
                 <span className="sub">
                   {(snapshot.boundTabCounts[tab.id] ?? 0) > 0
                     ? `${snapshot.boundTabCounts[tab.id]} tab${snapshot.boundTabCounts[tab.id] === 1 ? "" : "s"} open · `

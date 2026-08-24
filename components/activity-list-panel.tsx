@@ -1,9 +1,9 @@
-import { useDeferredValue, useEffect, useMemo, useRef, useState, useTransition, type ReactNode } from "react";
-import { createPortal } from "react-dom";
+import { useDeferredValue, useEffect, useMemo, useState, useTransition } from "react";
 
 import { ActivityHealthBadges } from "@/components/activity-health-badges";
 import { ActivityMetadataEditor } from "@/components/activity-metadata-editor";
 import { ExportActivityButtons } from "@/components/export-activity-buttons";
+import { TabActionsMenu } from "@/components/tab-actions-menu";
 import {
   activityHealthRecoveryHint,
   hasActivityHealthIssues,
@@ -14,71 +14,13 @@ import { sendMessage, type PopupSnapshot } from "@/lib/messaging";
 import { describeSeriesPattern, type TrackedTab } from "@/lib/types";
 import { formatDevice, relativeTime } from "@/lib/view-utils";
 import { M3Button } from "../entrypoints/popup/components/m3-button";
-import { IconMoreVertical } from "../entrypoints/popup/components/icons";
+import { IconSearch } from "../entrypoints/popup/components/icons";
 import { M3Select, M3TextField } from "../entrypoints/popup/components/m3-text-field";
 import { SeriesTetherPanel } from "./series-tether-panel";
 
 type ActivityView = "active" | "archived";
 
 type CloudGroupOption = { id: string; name: string };
-
-function TabActionsMenu({ children }: { children: ReactNode }) {
-  const [open, setOpen] = useState(false);
-  const trigger = useRef<HTMLButtonElement>(null);
-  const menu = useRef<HTMLDivElement>(null);
-  const [position, setPosition] = useState({ top: 0, left: 0 });
-
-  useEffect(() => {
-    if (!open) return;
-    const closeOnOutsideClick = (event: PointerEvent) => {
-      if (!trigger.current?.contains(event.target as Node) && !menu.current?.contains(event.target as Node)) {
-        setOpen(false);
-      }
-    };
-    document.addEventListener("pointerdown", closeOnOutsideClick);
-    return () => document.removeEventListener("pointerdown", closeOnOutsideClick);
-  }, [open]);
-
-  const toggle = () => {
-    const rect = trigger.current?.getBoundingClientRect();
-    if (rect) {
-      setPosition({
-        top: Math.min(rect.bottom + 6, window.innerHeight - 190),
-        left: Math.max(8, Math.min(rect.right - 240, window.innerWidth - 248)),
-      });
-    }
-    setOpen((value) => !value);
-  };
-
-  return (
-    <>
-      <button
-        ref={trigger}
-        className="btn secondary tab-actions-menu__trigger"
-        type="button"
-        aria-label="More actions"
-        aria-expanded={open}
-        onClick={toggle}
-      >
-        <IconMoreVertical />
-      </button>
-      {open
-        ? createPortal(
-            <div
-              ref={menu}
-              className="tab-actions-menu__items"
-              role="menu"
-              style={position}
-              onClick={() => setOpen(false)}
-            >
-              {children}
-            </div>,
-            document.body,
-          )
-        : null}
-    </>
-  );
-}
 
 export function ActivityListPanel({
   snapshot,
@@ -156,40 +98,41 @@ export function ActivityListPanel({
   };
 
   return (
-    <div className="stack" role="tabpanel">
-      <div className="row wrap" style={{ justifyContent: "space-between", gap: 8 }}>
-        <span className="section-title" style={{ margin: 0 }}>
-          Tethered tabs
-        </span>
-        <div className="row wrap" style={{ gap: 6 }}>
+    <div className="stack activity-list" role="tabpanel">
+      <div className="activity-list__toolbar">
+        <div className="segmented" role="group" aria-label="Activity status">
           <button
-            className={`btn ghost${view === "active" ? " provider-choice__option--selected" : ""}`}
+            type="button"
+            className={`segmented__option${view === "active" ? " segmented__option--selected" : ""}`}
+            aria-pressed={view === "active"}
             disabled={pending}
             onClick={() => setView("active")}
           >
             Active
           </button>
           <button
-            className={`btn ghost${view === "archived" ? " provider-choice__option--selected" : ""}`}
+            type="button"
+            className={`segmented__option${view === "archived" ? " segmented__option--selected" : ""}`}
+            aria-pressed={view === "archived"}
             disabled={pending}
             onClick={() => setView("archived")}
           >
             Archived
           </button>
-          <M3Button
-            variant="text"
-            disabled={pending}
-            onClick={() =>
-              run(async () => {
-                const res = await sendMessage({ type: "SYNC_NOW" });
-                if (!res.ok) throw new Error(res.error);
-                if (res.snapshot) onUpdate(res.snapshot);
-              })
-            }
-          >
-            Sync now
-          </M3Button>
         </div>
+        <M3Button
+          variant="text"
+          disabled={pending}
+          onClick={() =>
+            run(async () => {
+              const res = await sendMessage({ type: "SYNC_NOW" });
+              if (!res.ok) throw new Error(res.error);
+              if (res.snapshot) onUpdate(res.snapshot);
+            })
+          }
+        >
+          Sync now
+        </M3Button>
       </div>
 
       <M3TextField
@@ -197,6 +140,8 @@ export function ActivityListPanel({
         label="Search activities"
         value={query}
         onChange={setQuery}
+        icon={<IconSearch />}
+        placeholder="Name, URL, tag…"
       />
 
       {unhealthyCount > 0 && view === "active" ? (
@@ -390,18 +335,7 @@ export function ActivityListPanel({
       ) : (
         <div className={`list compact-list${fullPage ? " local-dashboard__tab-grid" : ""}`}>
           {tabs.map((tracked) => (
-            <div key={tracked.id} className="panel compact-track local-dashboard__tab-card">
-              <label className="row" style={{ gap: 8, alignItems: "center", marginBottom: 8 }}>
-                <input
-                  type="checkbox"
-                  checked={selectedIds.has(tracked.id)}
-                  onChange={() => toggleSelected(tracked.id)}
-                />
-                <span className="muted" style={{ fontSize: 11 }}>
-                  Select
-                </span>
-              </label>
-
+            <div key={tracked.id} className="panel compact-track activity-card local-dashboard__tab-card">
               {editingId === tracked.id ? (
                 <ActivityMetadataEditor
                   tracked={tracked}
@@ -411,44 +345,50 @@ export function ActivityListPanel({
                   onSaved={() => setEditingId(null)}
                 />
               ) : (
-                <>
-                  <div className="row" style={{ justifyContent: "space-between" }}>
-                    <span className="name">
-                      {tracked.emoji ? `${tracked.emoji} ` : ""}
-                      {tracked.name}
-                    </span>
-                    <div className="row wrap" style={{ gap: 6 }}>
-                      {tracked.tetherMode === "series" ? <span className="pill">Series</span> : null}
-                      {tracked.isPrivate ? <span className="pill">Private</span> : null}
-                      {tracked.archivedAt ? <span className="pill">Archived</span> : null}
-                      {tracked.activeDevice ? (
-                        <span className={`pill${tracked.health?.ownerOffline ? " pill--warning" : ""}`}>
-                          {tracked.activeDevice.name}
-                        </span>
-                      ) : null}
+                <div className="activity-card__header">
+                  <label className="activity-card__select">
+                    <input
+                      type="checkbox"
+                      checked={selectedIds.has(tracked.id)}
+                      onChange={() => toggleSelected(tracked.id)}
+                      aria-label={`Select ${tracked.name}`}
+                    />
+                  </label>
+                  <div className="activity-card__body">
+                    <div className="activity-card__title-row">
+                      <span className="name">
+                        {tracked.emoji ? `${tracked.emoji} ` : ""}
+                        {tracked.name}
+                      </span>
+                      <div className="activity-card__pills">
+                        {tracked.tetherMode === "series" ? <span className="pill">Series</span> : null}
+                        {tracked.isPrivate ? <span className="pill">Private</span> : null}
+                        {tracked.archivedAt ? <span className="pill">Archived</span> : null}
+                        {tracked.activeDevice ? (
+                          <span className={`pill${tracked.health?.ownerOffline ? " pill--warning" : ""}`}>
+                            {tracked.activeDevice.name}
+                          </span>
+                        ) : null}
+                      </div>
                     </div>
+                    <ActivityHealthBadges health={tracked.health} />
+                    {tracked.health && activityHealthRecoveryHint(tracked.health) ? (
+                      <p className="activity-health-hint">{activityHealthRecoveryHint(tracked.health)}</p>
+                    ) : null}
+                    {tracked.tetherMode === "series" ? (
+                      <p className="muted activity-card__meta">{describeSeriesPattern(tracked.seriesPattern)}</p>
+                    ) : null}
+                    {tracked.currentTitle ? (
+                      <p className="sub activity-card__meta">{tracked.currentTitle}</p>
+                    ) : null}
+                    <p className="muted local-dashboard__tab-url activity-card__meta">
+                      {displayHostPath(tracked.currentUrl)}
+                    </p>
+                    <p className="muted activity-card__meta">
+                      {formatDevice(tracked)} · {relativeTime(tracked.lastUpdatedAt)}
+                    </p>
                   </div>
-                  <ActivityHealthBadges health={tracked.health} />
-                  {tracked.health && activityHealthRecoveryHint(tracked.health) ? (
-                    <p className="activity-health-hint">{activityHealthRecoveryHint(tracked.health)}</p>
-                  ) : null}
-                  {tracked.tetherMode === "series" ? (
-                    <p className="muted" style={{ margin: "4px 0 0", fontSize: 11 }}>
-                      {describeSeriesPattern(tracked.seriesPattern)}
-                    </p>
-                  ) : null}
-                  {tracked.currentTitle ? (
-                    <p className="sub" style={{ margin: "4px 0 0" }}>
-                      {tracked.currentTitle}
-                    </p>
-                  ) : null}
-                  <p className="muted local-dashboard__tab-url" style={{ margin: "4px 0 0", fontSize: 11 }}>
-                    {displayHostPath(tracked.currentUrl)}
-                  </p>
-                  <p className="muted" style={{ margin: "4px 0 0", fontSize: 11 }}>
-                    {formatDevice(tracked)} · {relativeTime(tracked.lastUpdatedAt)}
-                  </p>
-                </>
+                </div>
               )}
 
               <div className="row wrap local-dashboard__tab-actions">
@@ -459,7 +399,7 @@ export function ActivityListPanel({
                 ) : view === "archived" ? (
                   <>
                     <button
-                      className="btn"
+                      className="btn compact"
                       disabled={pending}
                       onClick={() =>
                         run(async () => {
@@ -497,7 +437,7 @@ export function ActivityListPanel({
                 ) : (
                   <>
                     <button
-                      className="btn"
+                      className="btn compact"
                       disabled={pending}
                       onClick={() =>
                         run(async () => {

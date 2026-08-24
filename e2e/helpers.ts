@@ -21,7 +21,7 @@ export async function waitForPopupReady(popup: Page) {
   await expect(popup.getByRole("heading", { name: "TabTether" })).toBeVisible();
   await completeOnboarding(popup);
   await popup.reload();
-  await expect(popup.getByRole("heading", { name: "Current page" })).toBeVisible();
+  await expect(popup.getByText("Current page")).toBeVisible();
 }
 
 /**
@@ -49,7 +49,7 @@ export async function tetherTab(
   }
 
   await popup.reload();
-  await expect(popup.getByRole("heading", { name: "Tethered tabs" })).toBeVisible();
+  await expect(popup.getByText("Tethered")).toBeVisible();
   await expect(popup.getByText(name)).toBeVisible();
 }
 

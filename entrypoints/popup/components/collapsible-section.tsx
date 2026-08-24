@@ -49,10 +49,20 @@ export function CollapsibleSection({
         >
           <span className="collapsible-section__chevron" aria-hidden />
           <span className="section-title collapsible-section__title">{title}</span>
-          {!open && badge ? <span className="collapsible-section__badge">{badge}</span> : null}
+          {!open && badge ? (
+            <span
+              className="collapsible-section__badge"
+              title={typeof badge === "string" ? badge : undefined}
+            >
+              {badge}
+            </span>
+          ) : null}
         </button>
         {actions ? (
-          <div className="collapsible-section__actions" onClick={(event) => event.stopPropagation()}>
+          <div
+            className="collapsible-section__actions"
+            onClick={(event) => event.stopPropagation()}
+          >
             {actions}
           </div>
         ) : null}

@@ -54,11 +54,25 @@ export function OnboardingView({
   return (
     <div className="stack onboarding">
       <div className="onboarding__brand">
+        <img src="/icon/128.png" width={40} height={40} alt="" />
         <h1 className="onboarding__title">TabTether</h1>
         <p className="muted onboarding__subtitle">
           Keep a persistent activity identity with its latest URL—resume reading, research, or a
           series on this browser or another.
         </p>
+        <ol className="onboarding__steps" aria-label="Setup steps">
+          {["How it works", "Sync modes", "This device"].map((label, index) => (
+            <li
+              key={label}
+              className={`onboarding__step${step === index ? " onboarding__step--current" : ""}${
+                step > index ? " onboarding__step--done" : ""
+              }`}
+            >
+              <span className="onboarding__step-index">{index + 1}</span>
+              <span className="onboarding__step-label">{label}</span>
+            </li>
+          ))}
+        </ol>
       </div>
 
       {step === 0 ? (

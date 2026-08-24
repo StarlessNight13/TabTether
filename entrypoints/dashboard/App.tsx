@@ -89,12 +89,12 @@ export default function App() {
         ) : (
           <>
             <header className="dashboard-page__header">
-              <div className="brand">
-                <div className="row" style={{ gap: 8 }}>
-                  <img src="/icon/128.png" width={28} height={28} alt="" />
+              <div className="dashboard-page__brand">
+                <img src="/icon/128.png" width={32} height={32} alt="" />
+                <div>
                   <h1>TabTether</h1>
+                  <p className="dashboard-page__subtitle">Activities on this device</p>
                 </div>
-                <span className="meta">Local dashboard</span>
               </div>
               <div className="row wrap dashboard-page__meta">
                 <span className="pill">{describeSyncModes(snapshot.syncModes)}</span>

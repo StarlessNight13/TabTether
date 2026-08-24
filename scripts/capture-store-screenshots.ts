@@ -59,7 +59,7 @@ async function waitForPopupReady(page: Page) {
     deviceName: "Screenshot device",
   });
   await page.reload();
-  await page.getByRole("heading", { name: "Current page" }).waitFor();
+  await page.getByText("Current page").waitFor();
 }
 
 async function sendMessage(page: Page, message: Record<string, unknown>) {
@@ -188,7 +188,7 @@ async function captureSeededShots() {
     }
 
     await popup.reload();
-    await popup.getByRole("heading", { name: "Tethered tabs" }).waitFor();
+    await popup.getByText("Tethered").waitFor();
     await popup.getByRole("button", { name: /Example Domain/ }).first().waitFor();
 
     const popupShot = await popup.locator(".app").screenshot({ type: "png" });
@@ -210,7 +210,7 @@ async function captureSeededShots() {
 
     const overview = await context.newPage();
     await overview.goto(`chrome-extension://${extensionId}/popup.html`);
-    await overview.getByRole("heading", { name: "Current page" }).waitFor();
+    await overview.getByText("Current page").waitFor();
     const overviewShot = await overview.locator(".app").screenshot({ type: "png" });
     await composePopupShot(
       context,
