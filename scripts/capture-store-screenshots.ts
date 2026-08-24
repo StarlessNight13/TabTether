@@ -53,6 +53,12 @@ async function launchExtension() {
 
 async function waitForPopupReady(page: Page) {
   await page.getByRole("heading", { name: "TabTether" }).waitFor();
+  await sendMessage(page, {
+    type: "COMPLETE_ONBOARDING",
+    syncModes: { offline: true, lan: false, online: false },
+    deviceName: "Screenshot device",
+  });
+  await page.reload();
   await page.getByRole("heading", { name: "Current page" }).waitFor();
 }
 

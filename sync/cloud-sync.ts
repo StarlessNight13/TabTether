@@ -12,6 +12,7 @@ import {
   compactLocalDatabase,
   deferOperation,
   getTabsCursor,
+  listCachedTabs,
   listPendingOperations,
   putCachedTab,
   removeOperation,
@@ -72,8 +73,8 @@ async function applyConditionalMutation(
       sql: `INSERT OR IGNORE INTO tracked_tab
         (id, workspace_id, group_id, name, emoji, tags, current_url, current_title,
          active_device_id, last_updated_device_id, is_private, archived_at, revision,
-         created_at, updated_at, deleted_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         created_at, updated_at, deleted_at, tether_mode, series_pattern)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       args: [
         tab.id,
         workspaceId,
@@ -91,6 +92,8 @@ async function applyConditionalMutation(
         tab.createdAt,
         tab.updatedAt,
         tab.deletedAt,
+        tab.tetherMode ?? "loose",
+        tab.seriesPattern ?? null,
       ],
     };
     receiptCheck = {
@@ -130,6 +133,25 @@ async function applyConditionalMutation(
         JSON.stringify(operation.payload.tags ?? []),
         operation.payload.groupId == null ? null : String(operation.payload.groupId),
         operation.payload.isPrivate ? 1 : 0,
+        operation.createdAt,
+        operation.entityId,
+        workspaceId,
+        operation.baseRevision ?? 0,
+      ],
+    };
+    receiptCheck = {
+      sql: "SELECT 1 FROM tracked_tab WHERE id = ? AND workspace_id = ? AND revision = ? AND updated_at = ?",
+      args: [operation.entityId, workspaceId, (operation.baseRevision ?? 0) + 1, operation.createdAt],
+    };
+  } else if (operation.kind === "update_tether") {
+    mutation = {
+      sql: `UPDATE tracked_tab SET tether_mode = ?, series_pattern = ?, last_updated_device_id = ?,
+        updated_at = ?, revision = revision + 1
+        WHERE id = ? AND workspace_id = ? AND revision = ? AND deleted_at IS NULL`,
+      args: [
+        String(operation.payload.tetherMode ?? "loose"),
+        operation.payload.seriesPattern == null ? null : String(operation.payload.seriesPattern),
+        deviceId,
         operation.createdAt,
         operation.entityId,
         workspaceId,
@@ -271,15 +293,66 @@ async function pull(client: DatabaseClient, workspaceId: string) {
   });
   const tabs = result.rows.map(tabFromRow);
   const last = tabs.at(-1);
-  if (last) await applyPulledTabs(tabs, { updatedAt: last.updatedAt, id: last.id });
+  if (tabs.length > 0) {
+    const state = await getLocalState();
+    const previousUrls = new Map<
+      string,
+      { currentUrl: string; currentTitle: string | null; updatedAt: number; isPrivate: boolean }
+    >();
+    for (const tab of await listCachedTabs()) {
+      previousUrls.set(tab.id, {
+        currentUrl: tab.currentUrl,
+        currentTitle: tab.currentTitle,
+        updatedAt: tab.updatedAt,
+        isPrivate: Boolean(tab.isPrivate),
+      });
+    }
+    for (const tab of state.cachedTabs) {
+      if (previousUrls.has(tab.id)) continue;
+      previousUrls.set(tab.id, {
+        currentUrl: tab.currentUrl,
+        currentTitle: tab.currentTitle,
+        updatedAt: Date.parse(tab.lastUpdatedAt) || Date.now(),
+        isPrivate: tab.isPrivate,
+      });
+    }
+
+    if (last) await applyPulledTabs(tabs, { updatedAt: last.updatedAt, id: last.id });
+
+    if (state.settings.recordHistory) {
+      const localHistory = { ...state.localHistory };
+      let historyChanged = false;
+      for (const tab of tabs) {
+        if (tab.deletedAt || tab.isPrivate) continue;
+        const previous = previousUrls.get(tab.id);
+        if (!previous || previous.isPrivate || previous.currentUrl === tab.currentUrl) continue;
+        const entries = localHistory[tab.id] ?? [];
+        if (entries.some((entry) => entry.url === previous.currentUrl)) continue;
+        localHistory[tab.id] = [
+          {
+            id: `cloud_prior_${tab.id}_${previous.updatedAt}`,
+            url: previous.currentUrl,
+            title: previous.currentTitle,
+            visitedAt: new Date(previous.updatedAt).toISOString(),
+          },
+          ...entries,
+        ].slice(0, 200);
+        historyChanged = true;
+      }
+      if (historyChanged) await setLocalState({ localHistory });
+    }
+  }
+
   const settings = await client.execute({
     sql: "SELECT * FROM workspace_settings WHERE workspace_id = ? AND deleted_at IS NULL",
     args: [workspaceId],
   });
   const row = settings.rows[0];
   if (row) {
+    const previous = await getLocalState();
     await setLocalState({
       settings: {
+        ...previous.settings,
         recordHistory: Boolean(row.record_history),
         stripQueryParams: Boolean(row.strip_query_params),
         stripFragments: Boolean(row.strip_fragments),

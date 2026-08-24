@@ -310,7 +310,7 @@ function LocalSettingsPanel({
         />
         <M3SwitchRow
           title="Online"
-          description="Sync through a connected database"
+          description="Cloud database — enough on its own once connected"
           checked={syncModes.online}
           onChange={() => toggleSyncMode("online")}
           id="dash-mode-online"
@@ -348,6 +348,13 @@ function LocalSettingsPanel({
           checked={snapshot.settings.recordHistory}
           onChange={(checked) => patchSettings({ recordHistory: checked })}
           id="dash-record-history"
+        />
+        <M3SwitchRow
+          title="Moved-on banner"
+          description="Show a banner when a page is in tether history but the activity continued elsewhere"
+          checked={snapshot.settings.showMovedOnBanner}
+          onChange={(checked) => patchSettings({ showMovedOnBanner: checked })}
+          id="dash-moved-on-banner"
         />
         <M3SwitchRow
           title="Store URL query parameters"

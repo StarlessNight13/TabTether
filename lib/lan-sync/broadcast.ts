@@ -91,6 +91,7 @@ async function handleLanMessage(raw: string) {
       if (parsed.history) {
         await mergePeerHistory(parsed.history);
       }
+      void browser.runtime.sendMessage({ type: "REFRESH_MOVED_ON_BANNERS" }).catch(() => {});
       return;
     }
 
@@ -101,6 +102,7 @@ async function handleLanMessage(raw: string) {
 
     if (parsed.type === "tab_created" || parsed.type === "tab_updated") {
       await applyPeerTabUpdate(parsed.tab);
+      void browser.runtime.sendMessage({ type: "REFRESH_MOVED_ON_BANNERS" }).catch(() => {});
     }
   } catch {
     // ignore malformed payloads

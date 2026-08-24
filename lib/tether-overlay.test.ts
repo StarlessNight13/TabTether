@@ -52,4 +52,29 @@ describe("withLocalTether", () => {
       seriesPattern: local.seriesPattern,
     });
   });
+
+  it("prefers synced cloud series over a stale local loose overlay", () => {
+    const cloud = tab({
+      currentUrl: "https://reader.test/ch/4",
+      tetherMode: "series",
+      seriesPattern: {
+        status: "ready",
+        anchorHostname: "reader.test",
+        observations: [],
+        navigationCount: 3,
+        urlPattern: "^/ch/\\d+$",
+        stableTokens: ["/ch/"],
+        changingHints: ["1", "2", "3"],
+      },
+    });
+    const local = tab({
+      tetherMode: "loose",
+      seriesPattern: undefined,
+    });
+
+    expect(withLocalTether(cloud, local)).toMatchObject({
+      tetherMode: "series",
+      seriesPattern: cloud.seriesPattern,
+    });
+  });
 });

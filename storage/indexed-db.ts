@@ -6,6 +6,7 @@ export const DATABASE_VERSION = 2;
 export type OutboxKind =
   | "create"
   | "update_location"
+  | "update_tether"
   | "rename"
   | "delete"
   | "takeover"
@@ -192,6 +193,13 @@ export async function storeConflict(operation: OutboxOperation, conflict: unknow
   const transaction = database.transaction(["outbox", "conflicts"], "readwrite");
   transaction.objectStore("outbox").delete(operation.operationId);
   transaction.objectStore("conflicts").put({ ...operation, conflict, recordedAt: Date.now() });
+  await complete(transaction);
+}
+
+export async function removeConflict(operationId: string) {
+  const database = await openLocalDatabase();
+  const transaction = database.transaction("conflicts", "readwrite");
+  transaction.objectStore("conflicts").delete(operationId);
   await complete(transaction);
 }
 

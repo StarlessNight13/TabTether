@@ -26,7 +26,18 @@ const KEYS = [
   "pendingReconnect",
   "queuedLocationUpdates",
   "restoreFingerprints",
+  "watchedActivityIds",
+  "lastSeenOnDevice",
 ] as const satisfies readonly (keyof LocalState)[];
+
+/** Fresh installs stay incomplete; profiles that already have local data skip onboarding. */
+export function migrateOnboardingComplete(
+  stored: Record<string, unknown>,
+  keys: readonly (keyof LocalState)[] = KEYS,
+): boolean | undefined {
+  if (stored.onboardingComplete !== undefined) return undefined;
+  return keys.some((key) => key !== "onboardingComplete" && stored[key] !== undefined);
+}
 
 function parseSyncModes(raw: unknown): SyncModes {
   if (!raw || typeof raw !== "object") return DEFAULT_LOCAL_STATE.syncModes;
@@ -45,8 +56,9 @@ function migrateLegacyState(stored: Record<string, unknown>): Partial<LocalState
     patch.syncModes = DEFAULT_LOCAL_STATE.syncModes;
   }
 
-  if (stored.onboardingComplete !== true) {
-    patch.onboardingComplete = true;
+  const onboardingComplete = migrateOnboardingComplete(stored, KEYS);
+  if (onboardingComplete !== undefined) {
+    patch.onboardingComplete = onboardingComplete;
   }
 
   if (stored.pairedLanDevices === undefined) {
@@ -70,7 +82,6 @@ function migrateLegacyState(stored: Record<string, unknown>): Partial<LocalState
   }
 
   if (stored.lanSignalingMode === undefined) {
-    const syncModes = parseSyncModes(stored.syncModes ?? patch.syncModes);
     patch.lanSignalingMode = resolveLanSignalingMode();
   }
 
@@ -110,7 +121,7 @@ export async function getLocalState(): Promise<LocalState> {
     onboardingComplete:
       typeof stored.onboardingComplete === "boolean"
         ? stored.onboardingComplete
-        : Boolean(migration.onboardingComplete),
+        : (migration.onboardingComplete ?? DEFAULT_LOCAL_STATE.onboardingComplete),
     pairedLanDevices: Array.isArray(stored.pairedLanDevices)
       ? (stored.pairedLanDevices as LocalState["pairedLanDevices"])
       : (migration.pairedLanDevices ?? []),
@@ -139,7 +150,32 @@ export async function getLocalState(): Promise<LocalState> {
     restoreFingerprints: parseRestoreFingerprints(
       stored.restoreFingerprints ?? migration.restoreFingerprints,
     ),
+    watchedActivityIds: parseWatchedActivityIds(stored.watchedActivityIds),
+    lastSeenOnDevice: parseLastSeenOnDevice(stored.lastSeenOnDevice),
   };
+}
+
+function parseWatchedActivityIds(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  return [...new Set(raw.filter((id): id is string => typeof id === "string" && id.length > 0))];
+}
+
+function parseLastSeenOnDevice(raw: unknown): LocalState["lastSeenOnDevice"] {
+  if (!raw || typeof raw !== "object") return {};
+  const out: LocalState["lastSeenOnDevice"] = {};
+  for (const [activityId, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (!value || typeof value !== "object") continue;
+    const entry = value as Record<string, unknown>;
+    if (typeof entry.urlKey !== "string" || entry.urlKey.length === 0) continue;
+    if (typeof entry.url !== "string" || entry.url.length === 0) continue;
+    if (typeof entry.seenAt !== "string" || entry.seenAt.length === 0) continue;
+    out[activityId] = {
+      urlKey: entry.urlKey,
+      url: entry.url,
+      seenAt: entry.seenAt,
+    };
+  }
+  return out;
 }
 
 function parseRestoreFingerprints(raw: unknown): LocalState["restoreFingerprints"] {

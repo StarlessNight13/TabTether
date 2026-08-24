@@ -46,6 +46,8 @@ const backupTables = {
     "created_at",
     "updated_at",
     "deleted_at",
+    "tether_mode",
+    "series_pattern",
   ],
   tracked_tab_history: [
     "id",

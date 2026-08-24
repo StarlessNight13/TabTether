@@ -694,6 +694,37 @@ a {
   text-align: center;
 }
 
+.onboarding__brand {
+  display: grid;
+  gap: 6px;
+}
+
+.onboarding__title {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--md-sys-color-on-surface);
+}
+
+.onboarding__subtitle {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.onboarding__list {
+  margin: 0;
+  padding-left: 1.15rem;
+  color: var(--ink-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.onboarding__list li + li {
+  margin-top: 6px;
+}
+
 .pill {
   display: inline-flex;
   align-items: center;
@@ -1209,13 +1240,48 @@ a {
 }
 
 .cloud-conflicts {
-  max-height: 180px;
+  display: grid;
+  gap: 10px;
+  max-height: 280px;
   margin: 0;
   padding: 10px;
   overflow: auto;
   border-radius: var(--radius-sm);
   background: var(--paper-2);
-  color: var(--ink-muted);
-  font-size: 10px;
-  white-space: pre-wrap;
+}
+
+.cloud-conflict {
+  display: grid;
+  gap: 6px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid color-mix(in srgb, var(--ink) 10%, transparent);
+}
+
+.cloud-conflict:last-child {
+  padding-bottom: 0;
+  border-bottom: none;
+}
+
+.cloud-conflict__header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.cloud-conflict__reason {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.cloud-conflict__summary {
+  margin: 0;
+  font-size: 11px;
+  word-break: break-word;
+}
+
+.cloud-conflict__actions {
+  gap: 4px;
 }

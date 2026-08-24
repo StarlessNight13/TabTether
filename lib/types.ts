@@ -35,6 +35,8 @@ export type PrivacySettings = {
   dashboardThemeSeed: string;
   dashboardThemeVariant: DashboardThemeVariant;
   historyRetentionDays: 7 | 30 | 90 | null;
+  /** Show an in-page banner when a tab URL matches tether history but the activity has moved on. */
+  showMovedOnBanner: boolean;
 };
 
 export type DeviceInfo = {
@@ -137,6 +139,10 @@ export type LocalState = {
   queuedLocationUpdates: Record<string, QueuedLocationUpdate>;
   /** activityId -> local restore fingerprint (device-local only). */
   restoreFingerprints: Record<string, RestoreFingerprint>;
+  /** Activity ids this device is watching for remote progress (device-local). */
+  watchedActivityIds: string[];
+  /** Last URL this device acknowledged per activity (device-local). */
+  lastSeenOnDevice: Record<string, { urlKey: string; url: string; seenAt: string }>;
 };
 
 export const DEFAULT_SETTINGS: PrivacySettings = {
@@ -147,6 +153,7 @@ export const DEFAULT_SETTINGS: PrivacySettings = {
   dashboardThemeSeed: DEFAULT_DASHBOARD_THEME_SEED,
   dashboardThemeVariant: DEFAULT_DASHBOARD_THEME_VARIANT,
   historyRetentionDays: null,
+  showMovedOnBanner: true,
 };
 
 export const DEFAULT_LOCAL_STATE: LocalState = {
@@ -155,7 +162,7 @@ export const DEFAULT_LOCAL_STATE: LocalState = {
   localDeviceId: null,
   syncModes: DEFAULT_SYNC_MODES,
   lanSignalingMode: "local",
-  onboardingComplete: true,
+  onboardingComplete: false,
   pairedLanDevices: [],
   localHistory: {},
   bindings: {},
@@ -164,4 +171,6 @@ export const DEFAULT_LOCAL_STATE: LocalState = {
   pendingReconnect: [],
   queuedLocationUpdates: {},
   restoreFingerprints: {},
+  watchedActivityIds: [],
+  lastSeenOnDevice: {},
 };

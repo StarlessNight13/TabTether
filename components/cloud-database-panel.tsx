@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useTransition } from "react";
 
 import { isFirefoxFamily } from "../lib/browser-capabilities";
+import type { ConflictResolution, ConflictView } from "../lib/conflict-view";
 import { sendMessage, type PopupSnapshot } from "../lib/messaging";
 import { M3Button } from "../entrypoints/popup/components/m3-button";
 import { M3SwitchRow } from "../entrypoints/popup/components/m3-switch";
@@ -8,6 +9,12 @@ import { M3Select, M3TextField } from "../entrypoints/popup/components/m3-text-f
 import { DEFAULT_CLOUD_SYNC_POLICY, type CloudSyncPolicy } from "../services/database-service";
 import type { DatabaseProvider } from "../services/database-service";
 import type { DatabaseLog } from "../storage/indexed-db";
+
+const RESOLUTION_LABELS: Record<ConflictResolution, string> = {
+  keep_mine: "Keep mine",
+  keep_theirs: "Keep theirs",
+  dismiss: "Dismiss",
+};
 
 /** Must be invoked synchronously from a click handler (not inside startTransition). */
 function requestCloudConsent(): Promise<boolean> {
@@ -36,7 +43,7 @@ export function CloudDatabasePanel({
     snapshot.cloud.configuration?.tokenPersistence !== "session",
   );
   const [error, setError] = useState<string | null>(null);
-  const [conflicts, setConflicts] = useState<unknown[] | null>(null);
+  const [conflicts, setConflicts] = useState<ConflictView[] | null>(null);
   const [logs, setLogs] = useState<DatabaseLog[]>([]);
   const [behavior, setBehavior] = useState<CloudSyncPolicy>(
     snapshot.cloud.configuration?.behavior ?? DEFAULT_CLOUD_SYNC_POLICY,
@@ -188,6 +195,18 @@ export function CloudDatabasePanel({
       const response = await sendMessage({ type: "GET_CONFLICTS" });
       if (!response.ok) throw new Error(response.error);
       setConflicts(response.conflicts ?? []);
+    });
+
+  const resolveConflictAction = (operationId: string, resolution: ConflictResolution) =>
+    run(async () => {
+      const response = await sendMessage({
+        type: "RESOLVE_CONFLICT",
+        operationId,
+        resolution,
+      });
+      if (!response.ok) throw new Error(response.error);
+      setConflicts(response.conflicts ?? []);
+      if (response.snapshot) onUpdate(response.snapshot);
     });
 
   const configuration = snapshot.cloud.configuration;
@@ -344,9 +363,44 @@ export function CloudDatabasePanel({
         </>
       ) : null}
       {conflicts ? (
-        <pre className="cloud-conflicts">
-          {conflicts.length ? JSON.stringify(conflicts, null, 2) : "No conflicts"}
-        </pre>
+        <div className="cloud-conflicts" role="list" aria-label="Sync conflicts">
+          {conflicts.length === 0 ? (
+            <p className="muted" style={{ margin: 0, fontSize: 11 }}>
+              No conflicts
+            </p>
+          ) : (
+            conflicts.map((conflict) => (
+              <article key={conflict.operationId} className="cloud-conflict" role="listitem">
+                <div className="cloud-conflict__header">
+                  <strong>{conflict.activityName}</strong>
+                  <span className="pill">{conflict.kindLabel}</span>
+                </div>
+                <p className="cloud-conflict__reason">{conflict.reasonLabel}</p>
+                <p className="muted cloud-conflict__summary">
+                  Yours: {conflict.mineSummary}
+                  {conflict.theirsSummary ? (
+                    <>
+                      <br />
+                      Cloud: {conflict.theirsSummary}
+                    </>
+                  ) : null}
+                </p>
+                <div className="row wrap cloud-conflict__actions">
+                  {conflict.actions.map((action) => (
+                    <M3Button
+                      key={action}
+                      variant={action === "keep_mine" ? "tonal" : "text"}
+                      disabled={pending}
+                      onClick={() => resolveConflictAction(conflict.operationId, action)}
+                    >
+                      {RESOLUTION_LABELS[action]}
+                    </M3Button>
+                  ))}
+                </div>
+              </article>
+            ))
+          )}
+        </div>
       ) : null}
       <div className="row wrap">
         <M3Button variant="text" disabled={pending} onClick={exportData}>

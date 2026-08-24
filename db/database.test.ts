@@ -44,7 +44,7 @@ describe("cloud database", () => {
       "SELECT (SELECT count(*) FROM workspace) workspaces, (SELECT count(*) FROM schema_migration) migrations",
     );
     expect(Number(counts.rows[0]?.workspaces)).toBe(1);
-    expect(Number(counts.rows[0]?.migrations)).toBe(1);
+    expect(Number(counts.rows[0]?.migrations)).toBe(2);
   });
 
   it("bootstraps one workspace and safely repeats migrations", async () => {
@@ -62,7 +62,7 @@ describe("cloud database", () => {
       "SELECT (SELECT count(*) FROM workspace) workspaces, (SELECT count(*) FROM schema_migration) migrations",
     );
     expect(Number(counts.rows[0]?.workspaces)).toBe(1);
-    expect(Number(counts.rows[0]?.migrations)).toBe(1);
+    expect(Number(counts.rows[0]?.migrations)).toBe(2);
   });
 
   it("commits an owned revision update atomically and replays idempotently", async () => {

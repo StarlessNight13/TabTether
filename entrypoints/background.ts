@@ -27,6 +27,7 @@ import { supportedSyncModes, supportsLanSync } from "../lib/browser-capabilities
 import { stripTrackedTabBadge } from "../lib/title-badge";
 import {
   canUseTrackingFeatures,
+  trackingFeaturesDisabledReason,
   bindTabToActivity,
   confirmReconnect,
   dismissReconnect,
@@ -43,6 +44,16 @@ import {
   considerRestoredTab,
   applyBadgeForBrowserTab,
 } from "../lib/tracking";
+import {
+  applyMovedOnBannerForTab,
+  dismissMovedOnBanner,
+  goToMovedOnCurrent,
+  refreshMovedOnBanners,
+  resetMovedOnToHere,
+  resolveMovedOnForUrl,
+} from "../lib/moved-on-service";
+import { buildCatchUpItems } from "../lib/catch-up";
+import { markActivitySeen, setActivityWatching } from "../lib/watchlist";
 import { runCloudDatabaseSpike } from "../lib/cloud-db/spike";
 import { CLOUD_SYNC_ALARM, scheduleCloudSyncAlarm } from "../lib/cloud-sync-alarm";
 import { requestCloudSync } from "../sync/coordinator";
@@ -60,9 +71,9 @@ import {
   clearDatabaseLogs,
   getSyncStoreSummary,
   listCachedTabs,
-  listConflicts,
   listDatabaseLogs,
 } from "../storage/indexed-db";
+import { listConflictViews, resolveConflict } from "../sync/conflict-resolution";
 import type { PrivacySettings } from "../lib/types";
 import {
   clearCloudHistory,
@@ -82,6 +93,7 @@ import { getCloudCredentials } from "../storage/cloud-configuration";
 
 async function runFullSync() {
   await requestCloudSync("manual");
+  void refreshMovedOnBanners();
 }
 
 async function scheduleConfiguredCloudSync() {
@@ -158,8 +170,24 @@ async function buildSnapshot(): Promise<PopupSnapshot> {
       title: visibleTitle,
       tracked,
       isActiveOwner: Boolean(tracked && tracked.activeDeviceId === effectiveDeviceId),
+      movedOn: await resolveMovedOnForUrl(active.url!),
     };
   }
+
+  const trackedTabs = displayedTabs.map((tab) => ({
+    ...tab,
+    health: computeActivityHealth(tab, {
+      syncPending: Boolean(state.queuedLocationUpdates[tab.id]),
+    }),
+  }));
+
+  const catchUp = buildCatchUpItems({
+    tabs: trackedTabs,
+    watchedActivityIds: state.watchedActivityIds,
+    lastSeenOnDevice: state.lastSeenOnDevice,
+    settings: state.settings,
+    historyByActivity: state.localHistory,
+  });
 
   return {
     deviceId: state.deviceId ?? state.localDeviceId,
@@ -173,15 +201,12 @@ async function buildSnapshot(): Promise<PopupSnapshot> {
     currentTab,
     openTabs,
     boundTabCounts,
-    trackedTabs: displayedTabs.map((tab) => ({
-      ...tab,
-      health: computeActivityHealth(tab, {
-        syncPending: Boolean(state.queuedLocationUpdates[tab.id]),
-      }),
-    })),
+    trackedTabs,
     pendingReconnect: state.pendingReconnect,
     pendingSyncCount: Object.keys(state.queuedLocationUpdates).length,
     settings: state.settings,
+    watchedActivityIds: state.watchedActivityIds,
+    catchUp,
     cloud: { ...cloud, ...cloudStore },
   };
 }
@@ -197,12 +222,18 @@ async function updateSettingsPartial(settings: Partial<PrivacySettings>) {
       await purgeCloudHistoryByRetention(merged.historyRetentionDays);
     }
     await requestCloudSyncBestEffort("Cloud settings");
+    if (settings.showMovedOnBanner !== undefined) {
+      void refreshMovedOnBanners();
+    }
     return merged;
   }
 
   await setLocalState({ settings: merged });
   if (settings.historyRetentionDays !== undefined) {
     await purgeLocalHistoryByRetention(merged.historyRetentionDays);
+  }
+  if (settings.showMovedOnBanner !== undefined) {
+    void refreshMovedOnBanners();
   }
   return merged;
 }
@@ -321,6 +352,18 @@ async function handleMessage(message: ExtensionRequest): Promise<ExtensionRespon
         return { ok: true, snapshot: await buildSnapshot() };
       }
 
+      case "SET_WATCH": {
+        await setActivityWatching(message.trackedTabId, message.watching);
+        return { ok: true, snapshot: await buildSnapshot() };
+      }
+
+      case "MARK_SEEN": {
+        const tracked = await findSyncedTab(message.trackedTabId);
+        if (!tracked) throw new Error("Tethered tab not found");
+        await markActivitySeen(message.trackedTabId, message.url ?? tracked.currentUrl);
+        return { ok: true, snapshot: await buildSnapshot() };
+      }
+
       case "TAKE_OVER": {
         const [active] = await browser.tabs.query({ active: true, currentWindow: true });
         await takeOver(message.trackedTabId, active?.id);
@@ -350,6 +393,20 @@ async function handleMessage(message: ExtensionRequest): Promise<ExtensionRespon
         await setLocalState({
           syncModes,
           lanSignalingMode: resolveLanSignalingMode(),
+        });
+        return { ok: true, snapshot: await buildSnapshot() };
+      }
+
+      case "COMPLETE_ONBOARDING": {
+        const syncModes = supportedSyncModes(message.syncModes);
+        if (!isValidSyncModes(syncModes)) {
+          throw new Error("Select at least one sync mode");
+        }
+        await renameDevice(message.deviceName);
+        await setLocalState({
+          syncModes,
+          lanSignalingMode: resolveLanSignalingMode(),
+          onboardingComplete: true,
         });
         return { ok: true, snapshot: await buildSnapshot() };
       }
@@ -441,6 +498,50 @@ async function handleMessage(message: ExtensionRequest): Promise<ExtensionRespon
         return { ok: true, history, snapshot: await buildSnapshot() };
       }
 
+      case "MOVED_ON_DISMISS": {
+        await dismissMovedOnBanner({
+          trackedTabId: message.trackedTabId,
+          pageUrl: message.pageUrl,
+          currentUrl: message.currentUrl,
+        });
+        if (message.tabId !== undefined) {
+          await applyMovedOnBannerForTab(message.tabId);
+        } else {
+          void refreshMovedOnBanners();
+        }
+        return { ok: true, snapshot: await buildSnapshot() };
+      }
+
+      case "MOVED_ON_GO_TO": {
+        let tabId = message.tabId;
+        if (tabId === undefined) {
+          const [active] = await browser.tabs.query({ active: true, currentWindow: true });
+          tabId = active?.id;
+        }
+        if (tabId === undefined) throw new Error("No active tab");
+        await goToMovedOnCurrent(message.trackedTabId, tabId, message.url);
+        return { ok: true, snapshot: await buildSnapshot() };
+      }
+
+      case "MOVED_ON_RESET_HERE": {
+        let tabId = message.tabId;
+        if (tabId === undefined) {
+          const [active] = await browser.tabs.query({ active: true, currentWindow: true });
+          tabId = active?.id;
+        }
+        if (tabId === undefined) throw new Error("No active tab");
+        await resetMovedOnToHere(message.trackedTabId, tabId);
+        await applyBadgeForBrowserTab(tabId);
+        await applyMovedOnBannerForTab(tabId);
+        void refreshMovedOnBanners();
+        return { ok: true, snapshot: await buildSnapshot() };
+      }
+
+      case "REFRESH_MOVED_ON_BANNERS": {
+        await refreshMovedOnBanners();
+        return { ok: true };
+      }
+
       case "RUN_CLOUD_DB_SPIKE": {
         const cloudDatabaseSpike = await runCloudDatabaseSpike({
           url: message.url,
@@ -494,7 +595,12 @@ async function handleMessage(message: ExtensionRequest): Promise<ExtensionRespon
         return { ok: true, snapshot: await buildSnapshot() };
 
       case "GET_CONFLICTS": {
-        return { ok: true, conflicts: await listConflicts() };
+        return { ok: true, conflicts: await listConflictViews() };
+      }
+
+      case "RESOLVE_CONFLICT": {
+        const conflicts = await resolveConflict(message.operationId, message.resolution);
+        return { ok: true, conflicts, snapshot: await buildSnapshot() };
       }
 
       case "GET_DATABASE_LOGS":
@@ -595,7 +701,10 @@ async function trackFromContextMenu(tabId: number | undefined) {
   if (tabId === undefined) return;
 
   if (!(await canUseTrackingFeatures())) {
-    await showNotification("TabTether", "Complete setup and enable tab tethering first.");
+    await showNotification(
+      "TabTether",
+      (await trackingFeaturesDisabledReason()) ?? "Enable a sync mode before tethering tabs.",
+    );
     return;
   }
 
@@ -643,7 +752,28 @@ export default defineBackground(() => {
       message.type === "CONTENT_SCRIPT_READY" &&
       sender.tab?.id !== undefined
     ) {
-      void applyBadgeForBrowserTab(sender.tab.id).then(() => sendResponse({ ok: true }));
+      const tabId = sender.tab.id;
+      void Promise.all([
+        applyBadgeForBrowserTab(tabId),
+        applyMovedOnBannerForTab(tabId, sender.tab.url),
+      ]).then(() => sendResponse({ ok: true }));
+      return true;
+    }
+
+    if (
+      typeof message === "object" &&
+      message !== null &&
+      "type" in message &&
+      (message.type === "MOVED_ON_GO_TO" ||
+        message.type === "MOVED_ON_RESET_HERE" ||
+        message.type === "MOVED_ON_DISMISS") &&
+      sender.tab?.id !== undefined
+    ) {
+      const withTab = {
+        ...(message as object),
+        tabId: sender.tab.id,
+      } as ExtensionRequest;
+      void handleMessage(withTab).then(sendResponse);
       return true;
     }
 
@@ -676,6 +806,9 @@ export default defineBackground(() => {
     const url = changeInfo.url ?? tab.url;
     const title = changeInfo.title ?? tab.title;
     void handleTabUpdate(tabId, url, title);
+    if (changeInfo.url || changeInfo.status === "complete") {
+      void applyMovedOnBannerForTab(tabId, url);
+    }
   });
 
   browser.tabs.onCreated.addListener((tab) => {

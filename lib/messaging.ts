@@ -12,6 +12,9 @@ import type { CloudConfiguration, CloudStatus } from "../storage/cloud-configura
 import type { TrackingExtExport } from "../storage/export";
 import type { CloudSyncPolicy } from "../services/database-service";
 import type { DatabaseProvider } from "../services/database-service";
+import type { MovedOnMatch } from "./moved-on";
+import type { CatchUpItem } from "./catch-up";
+import type { ConflictView } from "./conflict-view";
 
 export type OpenWindowTab = {
   tabId: number;
@@ -36,6 +39,7 @@ export type PopupSnapshot = {
     title: string;
     tracked: TrackedTab | null;
     isActiveOwner: boolean;
+    movedOn: MovedOnMatch | null;
   } | null;
   /** Trackable browser tabs in the current window and their tether bindings. */
   openTabs: OpenWindowTab[];
@@ -45,6 +49,8 @@ export type PopupSnapshot = {
   pendingReconnect: ReconnectCandidate[];
   pendingSyncCount: number;
   settings: PrivacySettings;
+  watchedActivityIds: string[];
+  catchUp: CatchUpItem[];
   cloud: {
     configuration: CloudConfiguration | null;
     status: CloudStatus;
@@ -83,6 +89,11 @@ export type ExtensionRequest =
   | { type: "DISMISS_RECONNECT"; candidate: ReconnectCandidate }
   | { type: "UPDATE_SETTINGS"; settings: Partial<PrivacySettings> }
   | { type: "UPDATE_SYNC_MODES"; syncModes: SyncModes }
+  | {
+      type: "COMPLETE_ONBOARDING";
+      syncModes: SyncModes;
+      deviceName: string;
+    }
   | { type: "UPDATE_LAN_SIGNALING_MODE"; lanSignalingMode: LanSignalingMode }
   | { type: "RENAME_DEVICE"; name: string }
   | { type: "START_LOCAL_LAN_PAIRING" }
@@ -94,6 +105,12 @@ export type ExtensionRequest =
   | { type: "REFRESH" }
   | { type: "CLEAR_HISTORY"; trackedTabId: string }
   | { type: "GET_HISTORY"; trackedTabId: string }
+  | { type: "MOVED_ON_DISMISS"; trackedTabId: string; pageUrl: string; currentUrl?: string; tabId?: number }
+  | { type: "MOVED_ON_GO_TO"; trackedTabId: string; tabId?: number; url?: string }
+  | { type: "MOVED_ON_RESET_HERE"; trackedTabId: string; tabId?: number }
+  | { type: "REFRESH_MOVED_ON_BANNERS" }
+  | { type: "SET_WATCH"; trackedTabId: string; watching: boolean }
+  | { type: "MARK_SEEN"; trackedTabId: string; url?: string }
   | { type: "RUN_CLOUD_DB_SPIKE"; url: string; authToken: string }
   | {
       type: "CONFIGURE_CLOUD_DATABASE";
@@ -139,6 +156,11 @@ export type ExtensionRequest =
   | { type: "EXPORT_CLOUD_DATABASE" }
   | { type: "IMPORT_CLOUD_DATABASE"; data: unknown }
   | { type: "GET_CONFLICTS" }
+  | {
+      type: "RESOLVE_CONFLICT";
+      operationId: string;
+      resolution: "keep_mine" | "keep_theirs" | "dismiss";
+    }
   | { type: "GET_DATABASE_LOGS" }
   | { type: "CLEAR_DATABASE_LOGS" }
   | { type: "UPDATE_DATABASE_BEHAVIOR"; behavior: CloudSyncPolicy }
@@ -158,7 +180,7 @@ export type ExtensionResponse =
       cloudDatabaseSpike?: CloudDatabaseSpikeResult;
       exportData?: TrackingExtExport;
       cloudDatabaseExport?: unknown;
-      conflicts?: unknown[];
+      conflicts?: ConflictView[];
       groups?: unknown[];
       devices?: unknown[];
       logs?: unknown[];

@@ -1,6 +1,7 @@
 import type { TrackedTabRecord } from "../core/entities";
 import { createId } from "../core/ids";
-import type { TrackedTab } from "../lib/types";
+import type { SeriesTetherPattern, TetherMode, TrackedTab } from "../lib/types";
+import { parseSeriesPattern, parseTetherMode, serializeSeriesPattern } from "../lib/series-sync";
 import { getCloudCredentials } from "../storage/cloud-configuration";
 import { listCachedTabs } from "../storage/indexed-db";
 import { requestCloudSync } from "./coordinator";
@@ -23,6 +24,8 @@ export function cloudTabView(tab: TrackedTabRecord): TrackedTab {
     createdAt: new Date(tab.createdAt).toISOString(),
     archivedAt: tab.archivedAt ? new Date(tab.archivedAt).toISOString() : null,
     isPrivate: Boolean(tab.isPrivate),
+    tetherMode: parseTetherMode(tab.tetherMode),
+    seriesPattern: parseSeriesPattern(tab.seriesPattern),
     revision: tab.revision,
     deletedAt: tab.deletedAt ? new Date(tab.deletedAt).toISOString() : null,
     activeDevice:
@@ -56,10 +59,13 @@ export async function createCloudTab(input: {
   url: string;
   title?: string | null;
   recordHistory: boolean;
+  tetherMode?: TetherMode;
+  seriesPattern?: SeriesTetherPattern;
 }) {
   const cloud = await getCloudCredentials();
   if (!cloud) return null;
   const now = Date.now();
+  const tetherMode = input.tetherMode ?? "loose";
   const tab: TrackedTabRecord = {
     id: createId("tab"),
     workspaceId: cloud.workspaceId,
@@ -77,6 +83,8 @@ export async function createCloudTab(input: {
     createdAt: now,
     updatedAt: now,
     deletedAt: null,
+    tetherMode,
+    seriesPattern: serializeSeriesPattern(input.seriesPattern),
   };
   await enqueueOptimisticTab(tab, "create", {
     ...(tab as unknown as Record<string, unknown>),
@@ -88,7 +96,14 @@ export async function createCloudTab(input: {
 
 async function mutateCloudTab(
   id: string,
-  kind: "update_location" | "rename" | "delete" | "takeover" | "archive" | "restore",
+  kind:
+    | "update_location"
+    | "update_tether"
+    | "rename"
+    | "delete"
+    | "takeover"
+    | "archive"
+    | "restore",
   payload: Record<string, unknown>,
 ) {
   const cloud = await getCloudCredentials();
@@ -100,7 +115,12 @@ async function mutateCloudTab(
     kind === "rename"
       ? {
           name: String(payload.name),
-          emoji: payload.emoji == null ? null : payload.emoji !== undefined ? String(payload.emoji) : tab.emoji,
+          emoji:
+            payload.emoji == null
+              ? null
+              : payload.emoji !== undefined
+                ? String(payload.emoji)
+                : tab.emoji,
           tags:
             payload.tags !== undefined
               ? (payload.tags as string[])
@@ -115,6 +135,16 @@ async function mutateCloudTab(
             payload.isPrivate !== undefined ? Boolean(payload.isPrivate) : Boolean(tab.isPrivate),
         }
       : null;
+  const tetherPayload =
+    kind === "update_tether"
+      ? {
+          tetherMode: parseTetherMode(payload.tetherMode),
+          seriesPattern:
+            payload.seriesPattern === undefined
+              ? tab.seriesPattern
+              : serializeSeriesPattern(payload.seriesPattern as SeriesTetherPattern | null),
+        }
+      : null;
   const optimistic: TrackedTabRecord = {
     ...tab,
     ...(kind === "update_location"
@@ -122,6 +152,13 @@ async function mutateCloudTab(
           currentUrl: String(payload.url),
           currentTitle: payload.title == null ? tab.currentTitle : String(payload.title),
           activeDeviceId: cloud.deviceId,
+          lastUpdatedDeviceId: cloud.deviceId,
+        }
+      : {}),
+    ...(kind === "update_tether" && tetherPayload
+      ? {
+          tetherMode: tetherPayload.tetherMode,
+          seriesPattern: tetherPayload.seriesPattern,
           lastUpdatedDeviceId: cloud.deviceId,
         }
       : {}),
@@ -142,7 +179,7 @@ async function mutateCloudTab(
       : {}),
     updatedAt: now,
   };
-  await enqueueOptimisticTab(optimistic, kind, renamePayload ?? payload);
+  await enqueueOptimisticTab(optimistic, kind, tetherPayload ?? renamePayload ?? payload);
   void requestCloudSync(cloudSyncTriggerForKind(kind));
   return cloudTabView(optimistic);
 }
@@ -153,6 +190,11 @@ export const updateCloudTabLocation = (
   title: string | null,
   recordHistory: boolean,
 ) => mutateCloudTab(id, "update_location", { url, title, recordHistory });
+export const updateCloudTabTether = (
+  id: string,
+  tetherMode: TetherMode,
+  seriesPattern?: SeriesTetherPattern | null,
+) => mutateCloudTab(id, "update_tether", { tetherMode, seriesPattern });
 export const renameCloudTab = (
   id: string,
   name: string,

@@ -2,6 +2,8 @@ import { useDeferredValue, useMemo, useState, useTransition } from "react";
 
 import { displayHostPath } from "@/lib/privacy";
 import { sendMessage, type PopupSnapshot } from "@/lib/messaging";
+import { activityMatchesQuery } from "@/lib/activity-search";
+import { rankTabsForResume } from "@/lib/catch-up";
 import type { TrackedTab } from "@/lib/types";
 import { formatDevice, relativeTime } from "@/lib/view-utils";
 import { ActivityHealthBadges } from "@/components/activity-health-badges";
@@ -23,24 +25,32 @@ export function ResumePicker({
   const [query, setQuery] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
-  const deferredQuery = useDeferredValue(query.trim().toLocaleLowerCase());
+  const deferredQuery = useDeferredValue(query);
+
+  const catchUpIds = useMemo(
+    () => new Set(snapshot.catchUp.map((item) => item.trackedTabId)),
+    [snapshot.catchUp],
+  );
+  const catchUpById = useMemo(
+    () => new Map(snapshot.catchUp.map((item) => [item.trackedTabId, item])),
+    [snapshot.catchUp],
+  );
 
   const tabs = useMemo(() => {
     const active = snapshot.trackedTabs.filter((tab) => !tab.archivedAt);
-    if (!deferredQuery) return active;
-    return active.filter((tab) => {
-      const haystack = [
-        tab.name,
-        tab.currentTitle ?? "",
-        tab.currentUrl,
-        ...tab.tags,
-        tab.activeDevice?.name ?? "",
-      ]
-        .join(" ")
-        .toLocaleLowerCase();
-      return haystack.includes(deferredQuery);
+    const filtered = active.filter((tab) => activityMatchesQuery(tab, deferredQuery));
+    return rankTabsForResume(filtered, {
+      watchedActivityIds: snapshot.watchedActivityIds,
+      catchUpIds,
+      boundTabCounts: snapshot.boundTabCounts,
     });
-  }, [deferredQuery, snapshot.trackedTabs]);
+  }, [
+    catchUpIds,
+    deferredQuery,
+    snapshot.boundTabCounts,
+    snapshot.trackedTabs,
+    snapshot.watchedActivityIds,
+  ]);
 
   const resume = (tab: TrackedTab, takeOverOwnership: boolean) => {
     setError(null);
@@ -77,6 +87,7 @@ export function ResumePicker({
 
       <p className="muted" style={{ margin: 0, fontSize: 12 }}>
         Open an activity on this device and take ownership so URL updates sync from here.
+        Watched and behind activities appear first.
       </p>
 
       <M3TextField
@@ -98,6 +109,8 @@ export function ResumePicker({
             const ownedHere = Boolean(
               snapshot.deviceId && tab.activeDeviceId === snapshot.deviceId,
             );
+            const watching = snapshot.watchedActivityIds.includes(tab.id);
+            const catchUp = catchUpById.get(tab.id);
             return (
               <div key={tab.id} className="panel compact-track">
                 <button
@@ -116,6 +129,16 @@ export function ResumePicker({
                   <span className="name">
                     {tab.emoji ? `${tab.emoji} ` : ""}
                     {tab.name}
+                    {catchUp ? (
+                      <span className="pill pill--warning" style={{ marginLeft: 6 }}>
+                        {catchUp.progressLabel ?? "Behind"}
+                      </span>
+                    ) : null}
+                    {watching && !catchUp ? (
+                      <span className="pill" style={{ marginLeft: 6 }}>
+                        Watching
+                      </span>
+                    ) : null}
                     {ownedHere ? (
                       <span className="pill" style={{ marginLeft: 6 }}>
                         yours
@@ -140,7 +163,7 @@ export function ResumePicker({
                     disabled={pending}
                     onClick={() => resume(tab, true)}
                   >
-                    Resume
+                    {catchUp ? "Catch up" : "Resume"}
                   </button>
                   <button
                     className="btn secondary"

@@ -324,12 +324,44 @@ export async function mergeOfflineTabFromPeer(incoming: TrackedTab) {
     }
   }
 
-  const cachedTabs = existing
-    ? state.cachedTabs.map((t) => (t.id === incoming.id ? incoming : t))
-    : [incoming, ...state.cachedTabs];
+  // Older peers may omit series fields; don't wipe a richer local pattern on LWW URL updates.
+  const mergedIncoming =
+    existing && !incoming.seriesPattern && existing.seriesPattern
+      ? {
+          ...incoming,
+          tetherMode: existing.tetherMode ?? incoming.tetherMode,
+          seriesPattern: existing.seriesPattern,
+        }
+      : incoming;
 
-  await setLocalState({ cachedTabs });
-  return incoming;
+  const cachedTabs = existing
+    ? state.cachedTabs.map((t) => (t.id === mergedIncoming.id ? mergedIncoming : t))
+    : [mergedIncoming, ...state.cachedTabs];
+
+  const history = { ...state.localHistory };
+  if (
+    existing &&
+    existing.currentUrl !== mergedIncoming.currentUrl &&
+    state.settings.recordHistory &&
+    !mergedIncoming.isPrivate
+  ) {
+    const entries = history[mergedIncoming.id] ?? [];
+    const alreadyRecorded = entries.some((entry) => entry.url === existing.currentUrl);
+    if (!alreadyRecorded) {
+      history[mergedIncoming.id] = [
+        {
+          id: createHistoryId(),
+          url: existing.currentUrl,
+          title: existing.currentTitle,
+          visitedAt: existing.lastUpdatedAt,
+        },
+        ...entries,
+      ].slice(0, 200);
+    }
+  }
+
+  await setLocalState({ cachedTabs, localHistory: history });
+  return mergedIncoming;
 }
 
 export { detectBrowser };

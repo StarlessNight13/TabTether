@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { HistoryView } from "@/components/history-view";
 import { LocalDashboardView } from "@/components/local-dashboard-view";
+import { OnboardingView } from "@/components/onboarding-view";
 import { parseLocalDashboardTab } from "@/lib/open-dashboard";
 import { sendMessage, type PopupSnapshot } from "@/lib/messaging";
 import { describeSyncModes } from "@/lib/sync-modes";
@@ -79,7 +80,11 @@ export default function App() {
   return (
     <ExtensionThemeProvider settings={snapshot.settings}>
       <div className="app app--dashboard">
-        {historyTab ? (
+        {!snapshot.onboardingComplete ? (
+          <div className="dashboard-onboarding">
+            <OnboardingView snapshot={snapshot} onUpdate={setSnapshot} />
+          </div>
+        ) : historyTab ? (
           <HistoryView tab={historyTab} onBack={() => setHistoryTab(null)} onUpdate={setSnapshot} />
         ) : (
           <>

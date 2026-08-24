@@ -6,6 +6,7 @@ import { ExportActivityButtons } from "@/components/export-activity-buttons";
 import { HistoryView } from "@/components/history-view";
 import { ActivityMetadataEditor } from "@/components/activity-metadata-editor";
 import { ActivityHealthBadges } from "@/components/activity-health-badges";
+import { OnboardingView } from "@/components/onboarding-view";
 import { ResumePicker } from "@/components/resume-picker";
 import { SeriesTetherPanel } from "@/components/series-tether-panel";
 import { openDashboard } from "@/lib/open-dashboard";
@@ -116,7 +117,7 @@ function SettingsView({
           </p>
           <M3SwitchRow
             title="Online"
-            description="Sync through a connected database"
+            description="Cloud database — enough on its own once connected"
             checked={syncModes.online}
             onChange={() => toggleSyncMode("online")}
             id="settings-mode-online"
@@ -257,6 +258,13 @@ function SettingsView({
             id="settings-record-history"
           />
           <M3SwitchRow
+            title="Moved-on banner"
+            description="Show a banner when a page is in tether history but the activity continued elsewhere"
+            checked={snapshot.settings.showMovedOnBanner}
+            onChange={(checked) => patchSettings({ showMovedOnBanner: checked })}
+            id="settings-moved-on-banner"
+          />
+          <M3SwitchRow
             title="Store URL query parameters"
             description="Auth-related query keys are always removed"
             checked={!snapshot.settings.stripQueryParams}
@@ -354,6 +362,7 @@ function MainView({
   };
 
   const canTrack = Boolean(current && !tracked);
+  const movedOn = current?.movedOn ?? null;
   const seriesProgress = seriesLearningProgress(tracked?.seriesPattern);
   const lanSummary =
     snapshot.syncModes.lan && snapshot.pairedLanDevices.length > 0
@@ -473,13 +482,121 @@ function MainView({
         title="Current page"
         defaultOpen
         badge={
-          tracked
-            ? tracked.name
-            : current
-              ? current.title || displayHostPath(current.url)
-              : undefined
+          movedOn
+            ? "Moved on"
+            : tracked
+              ? tracked.name
+              : current
+                ? current.title || displayHostPath(current.url)
+                : undefined
         }
       >
+        {movedOn ? (
+          <div className="panel stack">
+            <p className="title" style={{ margin: 0 }}>
+              {movedOn.emoji ? `${movedOn.emoji} ` : ""}
+              {movedOn.name} continued from where you left
+            </p>
+            <p className="url">
+              {movedOn.chaptersBehind && movedOn.chaptersBehind > 0
+                ? movedOn.chaptersBehind === 1
+                  ? "1 chapter behind · "
+                  : `${movedOn.chaptersBehind} chapters behind · `
+                : null}
+              Now at {displayHostPath(movedOn.currentUrl)}
+            </p>
+            {movedOn.pageLabel && movedOn.currentLabel ? (
+              <p className="muted" style={{ margin: 0, fontSize: 11 }}>
+                {movedOn.pageLabel} → {movedOn.currentLabel}
+              </p>
+            ) : null}
+            {movedOn.recentStops.length > 0 ? (
+              <div className="stack" style={{ gap: 6 }}>
+                <span className="muted" style={{ margin: 0, fontSize: 11 }}>
+                  Jump to a recent stop:
+                </span>
+                <div className="list compact-list">
+                  {movedOn.recentStops.map((stop) => (
+                    <button
+                      key={stop.url}
+                      className="btn secondary"
+                      type="button"
+                      disabled={pending}
+                      onClick={() =>
+                        run(async () => {
+                          const res = await sendMessage({
+                            type: "MOVED_ON_GO_TO",
+                            trackedTabId: movedOn.trackedTabId,
+                            tabId: current?.id,
+                            url: stop.url,
+                          });
+                          if (!res.ok) throw new Error(res.error);
+                          if (res.snapshot) onUpdate(res.snapshot);
+                        })
+                      }
+                    >
+                      {stop.title?.trim() || displayHostPath(stop.url)}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+            <div className="row wrap">
+              <button
+                className="btn"
+                disabled={pending}
+                onClick={() =>
+                  run(async () => {
+                    const res = await sendMessage({
+                      type: "MOVED_ON_GO_TO",
+                      trackedTabId: movedOn.trackedTabId,
+                      tabId: current?.id,
+                    });
+                    if (!res.ok) throw new Error(res.error);
+                    if (res.snapshot) onUpdate(res.snapshot);
+                  })
+                }
+              >
+                Go To
+              </button>
+              <button
+                className="btn secondary"
+                disabled={pending}
+                onClick={() =>
+                  run(async () => {
+                    const res = await sendMessage({
+                      type: "MOVED_ON_RESET_HERE",
+                      trackedTabId: movedOn.trackedTabId,
+                      tabId: current?.id,
+                    });
+                    if (!res.ok) throw new Error(res.error);
+                    if (res.snapshot) onUpdate(res.snapshot);
+                  })
+                }
+              >
+                Reset to this page
+              </button>
+              <button
+                className="btn ghost"
+                disabled={pending}
+                onClick={() =>
+                  run(async () => {
+                    const res = await sendMessage({
+                      type: "MOVED_ON_DISMISS",
+                      trackedTabId: movedOn.trackedTabId,
+                      pageUrl: movedOn.pageUrl,
+                      currentUrl: movedOn.currentUrl,
+                    });
+                    if (!res.ok) throw new Error(res.error);
+                    if (res.snapshot) onUpdate(res.snapshot);
+                  })
+                }
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+        ) : null}
         {!current ? (
           <div className="panel">
             <p className="muted" style={{ margin: 0 }}>
@@ -565,6 +682,24 @@ function MainView({
                 onClick={() => onOpenHistory(tracked)}
               >
                 History
+              </button>
+              <button
+                className="btn secondary"
+                disabled={pending}
+                onClick={() =>
+                  run(async () => {
+                    const watching = snapshot.watchedActivityIds.includes(tracked.id);
+                    const res = await sendMessage({
+                      type: "SET_WATCH",
+                      trackedTabId: tracked.id,
+                      watching: !watching,
+                    });
+                    if (!res.ok) throw new Error(res.error);
+                    if (res.snapshot) onUpdate(res.snapshot);
+                  })
+                }
+              >
+                {snapshot.watchedActivityIds.includes(tracked.id) ? "Watching" : "Watch"}
               </button>
               <ExportActivityButtons tracked={tracked} disabled={pending} className="btn secondary" />
               {!tracked.archivedAt ? (
@@ -781,6 +916,70 @@ function MainView({
         )}
       </CollapsibleSection>
 
+      {snapshot.catchUp.length > 0 ? (
+        <CollapsibleSection
+          id="catch-up"
+          title="Catch up"
+          defaultOpen
+          badge={`${snapshot.catchUp.length}`}
+        >
+          <div className="list">
+            {snapshot.catchUp.map((item) => (
+              <div key={item.trackedTabId} className="panel">
+                <p className="title" style={{ margin: 0 }}>
+                  {item.emoji ? `${item.emoji} ` : ""}
+                  {item.name}
+                </p>
+                <p className="url">
+                  {item.progressLabel ? `${item.progressLabel} · ` : "Behind · "}
+                  Now at {displayHostPath(item.currentUrl)}
+                </p>
+                <p className="muted" style={{ margin: 0, fontSize: 11 }}>
+                  Last opened here {relativeTime(item.lastSeenAt)}
+                </p>
+                <div className="row wrap">
+                  <button
+                    className="btn"
+                    disabled={pending}
+                    onClick={() =>
+                      run(async () => {
+                        const res = await sendMessage({
+                          type: "OPEN_TAB",
+                          trackedTabId: item.trackedTabId,
+                          takeOver: true,
+                        });
+                        if (!res.ok) throw new Error(res.error);
+                        if (res.snapshot) onUpdate(res.snapshot);
+                        window.close();
+                      })
+                    }
+                  >
+                    Catch up
+                  </button>
+                  <button
+                    className="btn secondary"
+                    disabled={pending}
+                    onClick={() =>
+                      run(async () => {
+                        const res = await sendMessage({
+                          type: "MARK_SEEN",
+                          trackedTabId: item.trackedTabId,
+                          url: item.currentUrl,
+                        });
+                        if (!res.ok) throw new Error(res.error);
+                        if (res.snapshot) onUpdate(res.snapshot);
+                      })
+                    }
+                  >
+                    Dismiss
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </CollapsibleSection>
+      ) : null}
+
       {snapshot.openTabs.length > 0 ? (
         <CollapsibleSection
           id="window-tabs"
@@ -852,6 +1051,15 @@ function MainView({
                   {tab.emoji ? `${tab.emoji} ` : ""}
                   {tab.name}
                   {tracked?.id === tab.id ? " (current page)" : ""}
+                  {snapshot.catchUp.some((item) => item.trackedTabId === tab.id) ? (
+                    <span className="pill pill--warning" style={{ marginLeft: 6 }}>
+                      Behind
+                    </span>
+                  ) : snapshot.watchedActivityIds.includes(tab.id) ? (
+                    <span className="pill" style={{ marginLeft: 6 }}>
+                      Watching
+                    </span>
+                  ) : null}
                 </span>
                 <ActivityHealthBadges health={tab.health} />
                 <span className="sub">{tab.currentTitle || displayHostPath(tab.currentUrl)}</span>
@@ -914,7 +1122,9 @@ function App() {
   return (
     <ExtensionThemeProvider settings={snapshot.settings}>
       <div className="app">
-        {view === "settings" ? (
+        {!snapshot.onboardingComplete ? (
+          <OnboardingView snapshot={snapshot} onUpdate={setSnapshot} />
+        ) : view === "settings" ? (
           <SettingsView snapshot={snapshot} onBack={() => setView("main")} onUpdate={setSnapshot} />
         ) : view === "history" && historyTab ? (
           <HistoryPanel

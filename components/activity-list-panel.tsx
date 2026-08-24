@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useTransition, type ReactNode } from "react";
+import { useDeferredValue, useEffect, useMemo, useRef, useState, useTransition, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 
 import { ActivityHealthBadges } from "@/components/activity-health-badges";
@@ -8,6 +8,7 @@ import {
   activityHealthRecoveryHint,
   hasActivityHealthIssues,
 } from "@/lib/activity-health";
+import { activityMatchesQuery } from "@/lib/activity-search";
 import { displayHostPath } from "@/lib/privacy";
 import { sendMessage, type PopupSnapshot } from "@/lib/messaging";
 import { describeSeriesPattern, type TrackedTab } from "@/lib/types";
@@ -97,6 +98,8 @@ export function ActivityListPanel({
   fullPage: boolean;
 }) {
   const [view, setView] = useState<ActivityView>("active");
+  const [query, setQuery] = useState("");
+  const deferredQuery = useDeferredValue(query);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
   const [editingId, setEditingId] = useState<string | null>(null);
   const [seriesPanelId, setSeriesPanelId] = useState<string | null>(null);
@@ -107,9 +110,12 @@ export function ActivityListPanel({
   const [groups, setGroups] = useState<CloudGroupOption[]>([]);
   const [, startGroupsTransition] = useTransition();
 
-  const tabs = snapshot.trackedTabs.filter((tab) =>
-    view === "active" ? !tab.archivedAt : Boolean(tab.archivedAt),
-  );
+  const tabs = useMemo(() => {
+    const byArchive = snapshot.trackedTabs.filter((tab) =>
+      view === "active" ? !tab.archivedAt : Boolean(tab.archivedAt),
+    );
+    return byArchive.filter((tab) => activityMatchesQuery(tab, deferredQuery));
+  }, [deferredQuery, snapshot.trackedTabs, view]);
   const selectedVisibleIds = tabs.filter((tab) => selectedIds.has(tab.id)).map((tab) => tab.id);
   const unhealthyCount = snapshot.trackedTabs.filter(
     (tab) => tab.health && hasActivityHealthIssues(tab.health),
@@ -185,6 +191,13 @@ export function ActivityListPanel({
           </M3Button>
         </div>
       </div>
+
+      <M3TextField
+        id="dashboard-activity-search"
+        label="Search activities"
+        value={query}
+        onChange={setQuery}
+      />
 
       {unhealthyCount > 0 && view === "active" ? (
         <div className="activity-health-banner">
@@ -366,11 +379,13 @@ export function ActivityListPanel({
 
       {tabs.length === 0 ? (
         <div className="empty">
-          {view === "archived"
-            ? "No archived activities."
-            : fullPage
-              ? "No tethered tabs yet. Use the extension popup on any page to tether one."
-              : "No tethered tabs yet. Tether a page from the popup home screen."}
+          {deferredQuery.trim()
+            ? `No ${view} activities match “${deferredQuery.trim()}”.`
+            : view === "archived"
+              ? "No archived activities."
+              : fullPage
+                ? "No tethered tabs yet. Use the extension popup on any page to tether one."
+                : "No tethered tabs yet. Tether a page from the popup home screen."}
         </div>
       ) : (
         <div className={`list compact-list${fullPage ? " local-dashboard__tab-grid" : ""}`}>

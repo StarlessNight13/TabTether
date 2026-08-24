@@ -22,6 +22,8 @@ export function tabFromRow(row: Record<string, unknown>): TrackedTabRecord {
     createdAt: Number(row.created_at),
     updatedAt: Number(row.updated_at),
     deletedAt: row.deleted_at == null ? null : Number(row.deleted_at),
+    tetherMode: row.tether_mode == null ? "loose" : String(row.tether_mode),
+    seriesPattern: row.series_pattern == null ? null : String(row.series_pattern),
     activeDeviceName: row.active_device_name == null ? null : String(row.active_device_name),
     activeDeviceBrowser: row.active_device_browser == null ? null : String(row.active_device_browser),
     activeDeviceLastSeenAt:

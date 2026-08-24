@@ -23,6 +23,7 @@ import {
   renameCloudTab,
   takeOverCloudTab,
   updateCloudTabLocation,
+  updateCloudTabTether,
 } from "../../sync/cloud-tabs";
 
 export async function findSyncedTab(tabId: string): Promise<TrackedTab | null> {
@@ -84,17 +85,12 @@ export async function syncCreateTab(input: {
   seriesPattern?: SeriesTetherPattern;
 }): Promise<TrackedTab> {
   const state = await getLocalState();
-  if (await getCloudCredentials()) {
+  if (state.syncModes.online && (await getCloudCredentials())) {
     const tab = await createCloudTab({ ...input, recordHistory: state.settings.recordHistory });
     if (!tab) throw new Error("Cloud database is not configured");
-    const withTether: TrackedTab = {
-      ...tab,
-      tetherMode: input.tetherMode,
-      seriesPattern: input.seriesPattern,
-    };
-    await persistCachedTab(withTether);
-    if (state.syncModes.lan) void broadcastLanTabEvent({ type: "tab_created", tab: withTether });
-    return withTether;
+    await persistCachedTab(tab);
+    if (state.syncModes.lan) void broadcastLanTabEvent({ type: "tab_created", tab });
+    return tab;
   }
   const deviceId = await getEffectiveDeviceId();
   const deviceName = await getEffectiveDeviceName();
@@ -114,6 +110,9 @@ export async function syncCreateTab(input: {
   }
 
   if (!tab) {
+    if (state.syncModes.online) {
+      throw new Error("Connect a cloud database to tether tabs in Online mode");
+    }
     throw new Error("No sync mode available to create tab");
   }
 
@@ -134,15 +133,19 @@ export async function syncUpdateTabLocation(input: {
   const recordHistory = existing
     ? shouldRecordHistory(state.settings, existing.isPrivate)
     : state.settings.recordHistory;
-  if (await getCloudCredentials()) {
+  if (state.syncModes.online && (await getCloudCredentials())) {
     const tab = await updateCloudTabLocation(
       input.tabId,
       input.url,
       input.title ?? null,
       recordHistory,
     );
-    if (tab && state.syncModes.lan) void broadcastLanTabEvent({ type: "tab_updated", tab });
-    return tab;
+    if (!tab) return null;
+    // Keep local series overlay until cloud tether columns are populated / synced.
+    const merged = withLocalTether(tab, existing);
+    await persistCachedTab(merged);
+    if (state.syncModes.lan) void broadcastLanTabEvent({ type: "tab_updated", tab: merged });
+    return merged;
   }
   const deviceId = await getEffectiveDeviceId();
   const deviceName = await getEffectiveDeviceName();
@@ -170,20 +173,11 @@ export async function syncUpdateTabSeriesPattern(input: {
   tabId: string;
   seriesPattern: SeriesTetherPattern;
 }): Promise<TrackedTab | null> {
-  const existing = await findSyncedTab(input.tabId);
-  if (!existing) return null;
-
-  const updated: TrackedTab = {
-    ...existing,
+  return syncUpdateTabTether({
+    tabId: input.tabId,
     tetherMode: "series",
     seriesPattern: input.seriesPattern,
-    lastUpdatedAt: new Date().toISOString(),
-  };
-  const state = await persistCachedTab(updated);
-  if (state.syncModes.lan) {
-    void broadcastLanTabEvent({ type: "tab_updated", tab: updated });
-  }
-  return updated;
+  });
 }
 
 export async function syncUpdateTabTether(input: {
@@ -194,13 +188,27 @@ export async function syncUpdateTabTether(input: {
   const existing = await findSyncedTab(input.tabId);
   if (!existing) return null;
 
+  const state = await getLocalState();
+  if (state.syncModes.online && (await getCloudCredentials())) {
+    const tab = await updateCloudTabTether(input.tabId, input.tetherMode, input.seriesPattern);
+    if (!tab) return null;
+    const merged: TrackedTab = {
+      ...tab,
+      tetherMode: input.tetherMode,
+      seriesPattern: input.seriesPattern,
+    };
+    await persistCachedTab(merged);
+    if (state.syncModes.lan) void broadcastLanTabEvent({ type: "tab_updated", tab: merged });
+    return merged;
+  }
+
   const updated: TrackedTab = {
     ...existing,
     tetherMode: input.tetherMode,
     seriesPattern: input.seriesPattern,
     lastUpdatedAt: new Date().toISOString(),
   };
-  const state = await persistCachedTab(updated);
+  await persistCachedTab(updated);
   if (state.syncModes.lan) void broadcastLanTabEvent({ type: "tab_updated", tab: updated });
   return updated;
 }

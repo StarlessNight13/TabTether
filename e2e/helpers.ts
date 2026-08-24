@@ -2,9 +2,25 @@ import type { Page, Worker } from "@playwright/test";
 
 import { expect } from "./fixtures";
 
+/** Finish first-run onboarding so tests land on the main popup UI. */
+export async function completeOnboarding(page: Page) {
+  const response = await page.evaluate(async () => {
+    return await chrome.runtime.sendMessage({
+      type: "COMPLETE_ONBOARDING",
+      syncModes: { offline: true, lan: false, online: false },
+      deviceName: "Test device",
+    });
+  });
+  if (!response?.ok) {
+    throw new Error(response?.error ?? "COMPLETE_ONBOARDING failed");
+  }
+}
+
 /** Wait for the popup UI to finish loading. */
 export async function waitForPopupReady(popup: Page) {
   await expect(popup.getByRole("heading", { name: "TabTether" })).toBeVisible();
+  await completeOnboarding(popup);
+  await popup.reload();
   await expect(popup.getByRole("heading", { name: "Current page" })).toBeVisible();
 }
 

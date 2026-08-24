@@ -24,7 +24,7 @@ import {
 } from "./sync/router";
 import { getLocalState, setLocalState } from "./storage";
 import { stripTrackedTabBadge } from "./title-badge";
-import type { ReconnectCandidate, TrackedTab } from "./types";
+import type { ReconnectCandidate, SyncModes, TrackedTab } from "./types";
 import {
   claimSessionRestoredBindings,
   matchRestoredBindings,
@@ -38,6 +38,7 @@ import {
   readTabActivityId,
   writeTabActivityId,
 } from "./tab-session-binding";
+import { markActivitySeen } from "./watchlist";
 
 type TitleBadgeMessage =
   | { type: "SET_TRACKED_TITLE_BADGE"; emoji?: string | null }
@@ -109,10 +110,35 @@ export async function refreshRestoreFingerprintForTab(tabId: number) {
   await captureRestoreFingerprint(tabId, trackedTabId);
 }
 
+export function canUseTrackingFeaturesFrom(
+  syncModes: SyncModes,
+  hasCloudCredentials: boolean,
+): boolean {
+  if (syncModes.offline || syncModes.lan) return true;
+  return Boolean(syncModes.online && hasCloudCredentials);
+}
+
+export function trackingFeaturesDisabledReasonFrom(
+  syncModes: SyncModes,
+  hasCloudCredentials: boolean,
+): string | null {
+  if (canUseTrackingFeaturesFrom(syncModes, hasCloudCredentials)) return null;
+  if (syncModes.online && !hasCloudCredentials) {
+    return "Connect a cloud database to tether tabs in Online mode";
+  }
+  return "Enable Offline, LAN, or Online sync in settings";
+}
+
 export async function canUseTrackingFeatures() {
   const state = await getLocalState();
-  if (state.syncModes.offline || state.syncModes.lan) return true;
-  return false;
+  const hasCloud = Boolean(await getCloudCredentials());
+  return canUseTrackingFeaturesFrom(state.syncModes, hasCloud);
+}
+
+export async function trackingFeaturesDisabledReason() {
+  const state = await getLocalState();
+  const hasCloud = Boolean(await getCloudCredentials());
+  return trackingFeaturesDisabledReasonFrom(state.syncModes, hasCloud);
 }
 
 export async function refreshCachedTabs() {
@@ -190,7 +216,9 @@ export async function trackCurrentTab(
 
   const state = await getLocalState();
   if (!(await canUseTrackingFeatures())) {
-    throw new Error("Enable local tab tethering in settings");
+    throw new Error(
+      (await trackingFeaturesDisabledReason()) ?? "Tab tethering is not available",
+    );
   }
 
   const url = sanitizeUrl(tab.url!, state.settings);
@@ -212,6 +240,7 @@ export async function trackCurrentTab(
 
   await setBinding(tabId, created.id);
   await applyTrackedTitleBadge(tabId, created.emoji);
+  await markActivitySeen(created.id, created.currentUrl);
   return created;
 }
 
@@ -222,7 +251,9 @@ export async function bindTabToActivity(tabId: number, trackedTabId: string) {
   }
 
   if (!(await canUseTrackingFeatures())) {
-    throw new Error("Enable local tab tethering in settings");
+    throw new Error(
+      (await trackingFeaturesDisabledReason()) ?? "Tab tethering is not available",
+    );
   }
 
   const state = await getLocalState();
@@ -237,6 +268,7 @@ export async function bindTabToActivity(tabId: number, trackedTabId: string) {
 
   await setBinding(tabId, trackedTabId);
   await applyTrackedTitleBadge(tabId, tracked.emoji);
+  await markActivitySeen(trackedTabId, tracked.currentUrl);
   return tracked;
 }
 
@@ -361,6 +393,7 @@ export async function openTrackedTab(tracked: TrackedTab, takeOverOwnership = fa
   } else {
     await setBinding(created.id, tracked.id);
   }
+  await markActivitySeen(tracked.id, tracked.currentUrl);
   return tracked;
 }
 
@@ -437,6 +470,7 @@ export async function handleTabUpdate(tabId: number, url?: string, title?: strin
       title: cleanTitle,
       emoji: tracked?.emoji,
     });
+    await markActivitySeen(trackedTabId, sanitized, state.settings);
   } catch (error) {
     console.warn("Failed to sync tracked tab location", error);
   }

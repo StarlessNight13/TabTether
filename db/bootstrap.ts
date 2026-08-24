@@ -1,6 +1,6 @@
 import { createId } from "../core/ids";
 import { requiredText } from "../core/validation";
-import type { DatabaseClient, Statement } from "./client";
+import type { DatabaseClient } from "./client";
 import { migrations } from "./migrations/manifest";
 
 const MIGRATION_TABLE = `CREATE TABLE IF NOT EXISTS schema_migration (
@@ -15,6 +15,11 @@ function statements(sql: string) {
     .split(";")
     .map((statement) => statement.trim())
     .filter(Boolean);
+}
+
+function isIgnorableMigrationError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  return /duplicate column name|already exists/i.test(message);
 }
 
 export async function migrateDatabase(client: DatabaseClient) {
@@ -34,14 +39,18 @@ export async function migrateDatabase(client: DatabaseClient) {
     }
     if (checksum) continue;
     const now = Date.now();
-    const batch: Statement[] = [
-      ...statements(migration.sql),
-      {
-        sql: "INSERT OR IGNORE INTO schema_migration (version, name, checksum, applied_at) VALUES (?, ?, ?, ?)",
-        args: [migration.version, migration.name, migration.checksum, now],
-      },
-    ];
-    await client.batch(batch, "write");
+    for (const sql of statements(migration.sql)) {
+      try {
+        await client.execute(sql);
+      } catch (error) {
+        // Concurrent bootstraps may race on non-idempotent ALTER TABLE ADD COLUMN.
+        if (!isIgnorableMigrationError(error)) throw error;
+      }
+    }
+    await client.execute({
+      sql: "INSERT OR IGNORE INTO schema_migration (version, name, checksum, applied_at) VALUES (?, ?, ?, ?)",
+      args: [migration.version, migration.name, migration.checksum, now],
+    });
     const recorded = await client.execute({
       sql: "SELECT checksum FROM schema_migration WHERE version = ?",
       args: [migration.version],

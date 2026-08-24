@@ -39,6 +39,10 @@ export type TrackedTabRecord = {
   createdAt: number;
   updatedAt: number;
   deletedAt: number | null;
+  /** loose | series — defaults to loose for pre-migration rows. */
+  tetherMode?: string | null;
+  /** JSON SeriesTetherPattern or null. */
+  seriesPattern?: string | null;
   activeDeviceName?: string | null;
   activeDeviceBrowser?: string | null;
   activeDeviceLastSeenAt?: number | null;

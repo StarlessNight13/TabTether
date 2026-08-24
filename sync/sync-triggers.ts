@@ -9,6 +9,7 @@ const ACTIVITY_SYNC_KINDS = new Set<OutboxKind>([
   "takeover",
   "archive",
   "restore",
+  "update_tether",
 ]);
 
 export function cloudSyncTriggerForKind(kind: OutboxKind): CloudSyncTrigger {
